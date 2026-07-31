@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stateguard3r"
+version = "0.1.0"
+description = "Recoverable persistent-state experiments for streaming 3D reconstruction"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "numpy>=1.26.4,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+]
+
+[project.scripts]
+stateguard3r-corrupt = "stateguard3r.corruption:main"
+stateguard3r-detect = "stateguard3r.detection:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stateguard3r"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
