@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = "stateguard3r.corruption.v0"
+SCHEMA_VERSION = "stateguard3r.corruption.v1"
 DEFAULT_SEED = 0
 RECTANGLE_COORDINATE_REFERENCE = "model_input_after_resize_and_center_crop"
 SUPPORTED_CORRUPTIONS = (
@@ -410,7 +410,7 @@ def _apply_dynamic_occlusion(
     coordinate_space = parameters.get("coordinate_space", "normalized")
     if coordinate_space != "normalized":
         raise CorruptionManifestError(
-            "dynamic_occlusion v0 only supports normalized rectangle coordinates"
+            "dynamic_occlusion v1 only supports normalized rectangle coordinates"
         )
     rectangle, rectangle_generated = _parse_rectangle(
         parameters.get("rectangle"), rng

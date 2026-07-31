@@ -1,4 +1,4 @@
-"""Strict, read-only replay of StateGuard3R corruption manifests.
+"""Strict, read-only replay of StateGuard3R corruption v1 manifests.
 
 Frame substitution and temporal reordering are already encoded in the final
 ``frames`` path order.  This module validates that provenance and only applies
@@ -22,7 +22,7 @@ from typing import Any, Callable, Mapping, Sequence
 import numpy as np
 
 
-SCHEMA_VERSION = "stateguard3r.corruption.v0"
+SCHEMA_VERSION = "stateguard3r.corruption.v1"
 MATERIALIZATION_MODE = "deferred_transforms_no_image_copy"
 INDEX_CONVENTION = "zero_based_inclusive"
 RECTANGLE_COORDINATE_REFERENCE = "model_input_after_resize_and_center_crop"
@@ -160,6 +160,24 @@ def _corruption_types(
             raise InputManifestError(
                 f"corruption {index} has unsupported type {corruption_type!r}"
             )
+        if corruption_type == "dynamic_occlusion":
+            parameters = raw.get("parameters")
+            if not isinstance(parameters, Mapping):
+                raise InputManifestError(
+                    f"corruption {index} dynamic_occlusion parameters must be an object"
+                )
+            if parameters.get("coordinate_space") != "normalized":
+                raise InputManifestError(
+                    f"corruption {index} dynamic_occlusion must be normalized"
+                )
+            if (
+                parameters.get("coordinate_reference")
+                != RECTANGLE_COORDINATE_REFERENCE
+            ):
+                raise InputManifestError(
+                    f"corruption {index} dynamic_occlusion has unsupported "
+                    "coordinate reference"
+                )
         start = _plain_int(raw.get("start"), name=f"corruption {index} start")
         end = _plain_int(raw.get("end"), name=f"corruption {index} end")
         if raw.get("start_frame") != start or raw.get("end_frame") != end:
@@ -305,7 +323,8 @@ def load_input_manifest(path: str | os.PathLike[str]) -> InputManifest:
     payload, _ = _load_json_object(manifest_path, name="input manifest")
     if payload.get("schema_version") != SCHEMA_VERSION:
         raise InputManifestError(
-            f"unsupported input manifest schema {payload.get('schema_version')!r}"
+            f"unsupported input manifest schema {payload.get('schema_version')!r}; "
+            f"expected {SCHEMA_VERSION!r}"
         )
     if payload.get("source_is_read_only") is not True:
         raise InputManifestError("input manifest must mark source_is_read_only=true")
