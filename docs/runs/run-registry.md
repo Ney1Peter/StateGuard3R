@@ -147,6 +147,47 @@ alternate local path. This exhausts the currently discoverable safe sources;
 future progress requires the official Google endpoint to recover or a
 user-provided, source-traceable file.
 
+### SETUP-0009: Retry Gate 0 resources after the source audit
+
+- Time: 2026-08-01 02:32 CST
+- StateGuard3R commit: `957499e457e4717bff4df901e18a0ccc2998ae6c`
+- Result: checkpoint and GPU gates remained blocked; no download or CUDA task started
+- `/data` free space: about 512 GiB (97% used)
+
+No real supported checkpoint or partial download was present. A bounded probe
+of the official Google Drive source timed out again, and no third-party source
+was contacted. Approximate L20 memory use by index was
+`395, 30854, 20595, 18909, 24651, 26139, 25249, 41495` MiB. Every card still
+had an existing compute process, including the low-memory process on GPU 0, so
+none met the empty-card rule. No existing process was changed.
+
+Subsequent runner-readiness work added pinned checkpoint-loader overrides
+(`8f6360c`, `e2d5f86`), froze the official runtime parameters
+(`59a1eac`, `8bf6154`), and recorded the loaded cuRoPE binary provenance
+(`2c44ea8`, `483ade1`). These commits and their tests strengthen the Gate 0
+guards; they do not constitute checkpoint loading or a model forward.
+
+### SETUP-0010: Final pre-launch recheck after runner hardening
+
+- Time: 2026-08-01 02:58–03:14 CST
+- StateGuard3R code commit: `483ade139400bce27a5f94bc9c9a08a8b0d40c65`
+- Result: checkpoint and GPU gates remained blocked; Gate 0 was not launched
+- `/data` free space at the final check: about 506 GiB (97% used)
+- CPU regression check with CUDA hidden: `174 passed in 1.16s`
+
+Bounded HEAD probes of the official `drive.google.com`,
+`drive.usercontent.google.com`, and `docs.google.com` URL forms all timed out
+with HTTP `000` and zero response bytes. No 512 or 224 supported checkpoint,
+`.part`, or `.partial` file existed under `/data/wangzheng`, and no download was
+started.
+
+At 03:14 CST, approximate memory use across GPU indices 0–7 was
+`395, 30854, 8592, 18909, 24651, 26139, 25249, 41495` MiB. Every card had an
+existing compute process. In particular, GPU 0's low-memory process was an
+existing root-owned Open WebUI service, so it was neither idle nor available
+to this task. No process was stopped or modified, and no CUDA context was
+started. The two external gates must both be rechecked before any later launch.
+
 ## Development pipeline records
 
 ### DEV-SYNTH-0001: Original synthetic CLI smoke
@@ -267,6 +308,62 @@ timeline.svg             f9bc651def0d97cad33ed101b2efc6d458c6671629772ed245a1a7e
 
 The embedded health/corruption snapshot hashes matched, the SVG parsed, and
 both Chateau source hashes remained unchanged.
+
+### DEV-SYNTH-0003-MATERIALIZATION-AUDIT: CPU pixel replay
+
+- Status: succeeded; supplements the original 0003 CLI smoke
+- Time: 2026-08-01 02:49–02:50 CST
+- StateGuard3R clean commit: `483ade139400bce27a5f94bc9c9a08a8b0d40c65`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Input: the 60 final ordered paths in `synthetic-smoke-0003`
+- Loader: official `load_images_for_eval`, size 512 with its normal crop
+- Materialization: `stateguard3r.input_manifest.materialize_manifest_views`
+- Output shape: every view was `1x3x384x512`
+- CUDA: hidden with an empty `CUDA_VISIBLE_DEVICES`; PyTorch reported
+  `torch.cuda.is_initialized() == False`
+- Files written: none; zero raster outputs
+
+The first inline attempt incorrectly passed `crop=True` to the generic
+`load_images` function. That API does not accept a `crop` keyword, so it raised
+`TypeError` before `materialize_manifest_views` ran; it produced no output file
+or CUDA work. The corrected audit then used the runner's actual preprocessing
+entry point, `load_images_for_eval(size=512, crop=True)`, and completed the
+materialization checks reported below.
+
+This audit actually applied the deferred transforms in memory. Every output
+image used storage distinct from its corresponding loader input, all 60 input
+tensor hashes were unchanged after materialization, and the two source-image
+hashes were unchanged:
+
+```text
+Chateau1.png  71ffb8c7d77e5ced0bb3dcd2cb0db84d0e98e6ff5ffd2d02696a7156e5284857
+Chateau2.png  c3a0be9e19f6b89491d692c71e3f2317c2288a898a990561d48b7667218b47c8
+```
+
+For every dynamic-occlusion frame, the observed changed-pixel bounding box
+equalled the rectangle produced by the v1 normalized-coordinate contract. The
+right and bottom endpoints below are exclusive. Every pixel inside was exactly
+the normalized red fill `[1, -1, -1]`, and every pixel outside was unchanged.
+
+| Frame | Normalized origin | Pixel bbox `(x0,y0,x1,y1)` | Changed pixels |
+|---:|---|---|---:|
+| 25 | `(0.25,0.25)` | `(128,96,384,288)` | 49,152 |
+| 26 | `(0.29,0.275)` | `(148,105,405,298)` | 49,601 |
+| 27 | `(0.33,0.30)` | `(168,115,425,308)` | 49,601 |
+| 28 | `(0.37,0.325)` | `(189,124,446,317)` | 49,601 |
+| 29 | `(0.41,0.35)` | `(209,134,466,327)` | 49,601 |
+
+The other corruption routes also matched their manifest provenance:
+`low_overlap_jump` selected source indices `50–54`, and
+`wrong_order_segment` selected `[44,43,42,41,40]`. Because this fixture repeats
+only two Chateau images, the selected path changed on only 3/5 low-overlap
+frames and 4/5 wrong-order frames; the center frame of the reversal maps to
+itself. Those routes validate ordering and provenance, not realistic
+low-overlap or temporal-corruption strength.
+
+This is CPU-only pixel-materialization evidence. It did not load ReCal3R
+weights, run a model forward, or produce real health signals, and it does not
+upgrade the synthetic detection metrics into research results.
 
 ### GATE0-REAL-0001: Official ReCal3R two-image smoke
 

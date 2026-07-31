@@ -1,8 +1,8 @@
 # StateGuard3R 初步可行性报告
 
 - 日期：2026-08-01
-- 证据截止时间：2026-08-01 02:29 CST
-- StateGuard3R 证据快照：`08e59d0f43c7ec0af7e48d487215b29c000ec39a`
+- 证据截止时间：2026-08-01 03:14 CST
+- StateGuard3R 证据快照：`483ade139400bce27a5f94bc9c9a08a8b0d40c65`
 - ReCal3R 固定上游：`466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
 - 当前结论：**HOLD — evidence pending**
 
@@ -23,17 +23,25 @@
   PyTorch 2.4.0+cu121、torchvision 0.19.0+cu121；`dust3r.model` 从固定 baseline
   的 `src/dust3r/model.py` 导入。环境依赖检查已通过，完整版本冻结见
   `docs/runs/recal3r-environment-freeze.txt`。
-- CroCo RoPE CUDA 扩展已用 CUDA 12.1 编译成功。这证明构建链可用，**不证明**扩展
-  已在 GPU 上执行。
+- CroCo RoPE CUDA 扩展已用 CUDA 12.1 编译成功。runner 现会拒绝 baseline 目录外的
+  扩展，并冻结实际加载 `.so` 的 9,523,120 B 大小和 SHA-256
+  `3bd89991bcebb9501da085f4722c55fd5ef48aa38936608ef986072313d9aede`。这证明构建链与
+  CPU import 可用，**不证明**扩展已在 GPU 上执行。
 - 外部 runner `scripts/run_recal3r_smoke.py` 的 CLI `--help` 已在 ReCal3R 独立
   解释器中通过。runner 已静态覆盖 checkpoint 文件名—输入尺寸—head 类型绑定、
   反序列化前 SHA-256 校验、模型模块来源、baseline/StateGuard3R 工作树状态、输入快照
   与运行后哈希复核、两图 `N-1` 次 calibrated update、输出有限性和轻量 provenance。
-  这些仍是接口与守卫证据，不是模型 forward 证据。
+  02:38 的 pinned-API 审计发现并修复了对上游合法 `load_state_dict` override 的必现误拒绝；
+  随后用真实固定类证明委托审计可捕获 `strict=False` 结果并完整恢复方法。runner 为本
+  ReCal3R smoke 显式选择 `model_update_type=recal3r` 与 `beta_base=0.1`（上游 parser
+  默认仍为 `cut3r`），并按官方 relpose launcher 的赋值语义同时冻结 model/config 两层的
+  `entropy_eps=2e-14`、`entropy_head_reduce=mean`、
+  `uncertainty_clamp_max=1.0` 和 `decay=0.95`。这些仍是接口与守卫证据，不是模型 forward
+  证据。
 - 官方 CPU image loader 已加载 Chateau 两图，得到 `1x3x384x512`、值域
   `[-1, 1]` 的输入；加载前后源文件哈希不变。该结果只通过预处理子门槛。
-- 2026-08-01 使用项目内 `TMPDIR` 和 `UV_CACHE_DIR` 实跑完整测试套件，结果为
-  `170 passed in 0.81s`。测试覆盖 corruption manifest、只读 replay、Health Ledger、
+- 2026-08-01 使用项目内 `TMPDIR` 和 `UV_CACHE_DIR` 实跑完整测试套件，最新明确隐藏
+  CUDA 的复核结果为 `174 passed in 1.16s`。测试覆盖 corruption manifest、只读 replay、Health Ledger、
   detection-only、timeline、synthetic CLI、正式 detection freeze/provenance gate 和
   ReCal3R runner 的 mock/静态契约；测试没有加载真实 checkpoint，也没有启动 CUDA。
 
@@ -62,6 +70,9 @@
 | `1e411fe`、`48236ec`、`7328c5d` | 正式 detection freeze gate、provenance 测试与执行契约 |
 | `233f1ac`、`0eec9d6` | 非零速度 synthetic 遮挡与回归测试 |
 | `08e59d0`、`2258d2c` | 0002 运行登记、在 `08e59d0` 上执行的 0003 运行登记与最新 Gate 0 资源快照 |
+| `8f6360c`、`e2d5f86` | 修复 pinned model `load_state_dict` override 误拒绝并增加委托/旁路测试 |
+| `59a1eac`、`8bf6154` | 冻结官方 ReCal3R runtime 参数、来源 provenance 与回归测试 |
+| `2c44ea8`、`483ade1` | 冻结实际 cuRoPE binary provenance 与路径拒绝测试 |
 
 以上提交证明代码和审计链已建立；它们不能替代 checkpoint forward、真实时序数据或
 holdout 结果。
@@ -105,9 +116,41 @@ holdout 结果。
 检测输出中嵌入的 health/manifest 单次内存快照哈希与文件一致，SVG 可解析，说明
 manifest v1/schema → 移动遮挡 metadata/strict-loader/labels → Health Ledger → 四方法检测
 → metrics → timeline 的接口闭环能够按固定输入重放。像素级 deferred transform replay
-由单元测试覆盖，但本次 0003 命令没有 materialize 图像；源图哈希保持不变。
+由单元测试覆盖，但本次 0003 原始命令没有 materialize 图像；源图哈希保持不变。下节的
+独立 CPU 审计随后补齐真实 loader 后的像素 materialization 证据。
 
-### 2.2 仅用于管线自检的数字
+### 2.2 CPU-only 像素 materialization 审计
+
+2026-08-01 02:49–02:50 CST 在干净提交 `483ade1` 上，以 ReCal3R 独立解释器、空
+`CUDA_VISIBLE_DEVICES` 和官方 `load_images_for_eval(size=512, crop=True)` 对 0003 的
+60 帧最终有序路径执行了实际 materialization。所有输入均为 `1x3x384x512 float32`、
+值域 `[-1,1]`；60 个输出均使用独立 tensor clone，原 loader tensors 逐字节未变，两个
+Chateau 源文件 SHA-256 前后不变，没有写 raster，且 `torch.cuda.is_initialized()` 为
+false。
+
+五个 normalized red occlusion 的实际空间差分与 floor/ceil 契约逐像素一致，`x1/y1` 为
+exclusive：
+
+| 帧 | 原点 | 实际 `(x0,y0,x1,y1)` | 改变的空间像素数 |
+|---:|---|---|---:|
+| 25 | `(0.25,0.25)` | `(128,96,384,288)` | 49,152 |
+| 26 | `(0.29,0.275)` | `(148,105,405,298)` | 49,601 |
+| 27 | `(0.33,0.30)` | `(168,115,425,308)` | 49,601 |
+| 28 | `(0.37,0.325)` | `(189,124,446,317)` | 49,601 |
+| 29 | `(0.41,0.35)` | `(209,134,466,327)` | 49,601 |
+
+每帧矩形内均精确为 `[1,-1,-1]`，矩形外逐像素不变；左上角连续向右下移动。manifest、
+materializer 源码与官方 loader 源码 SHA-256 分别为
+`864133efe020a024674f49ca3c0eaaa5a6a84ee45422e492bc14bdaba11657f2`、
+`e42852f87e704c5b9b90e12a9fa10506ec6f38290b9cd1a01d065e5dc77106c2` 和
+`a2738085cdf0f713289a3a42dbd49a1f39325eb3ad590af65970fe4609209d96`。
+
+路由断言也通过：low-overlap source indices 为 `50–54`，wrong-order 为
+`[44,43,42,41,40]`。但 fixture 只重复两张图片，所以前者实际路径仅 3/5 改变，后者
+4/5 改变；它证明路由和像素执行，不证明真实 low-overlap/时序破坏强度，也不是模型或
+科研结果。
+
+### 2.3 仅用于管线自检的数字
 
 | 方法 | AUROC | F1 | FPR | 平均 delay（帧） |
 |---|---:|---:|---:|---:|
@@ -138,8 +181,9 @@ risk 绝对幅值完全不具备现实校准意义。
 
 官方 final checkpoint `cut3r_512_dpt_4_64.pth` 仍不存在。官方 README 指向的
 Google Drive file ID `1Asz-ZB3FfpzZYwunhQvNPZEUA8XUNAYD` 在多次有限时连接中于
-DNS/HTTPS 建连阶段超时；02:17 CST 的最新一次限时 HEAD 检查仍为 DNS timeout、HTTP
-`000` 和零响应体。随后对两个官方 GitHub 仓库的 issue/release 元数据检查没有发现权重
+DNS/HTTPS 建连阶段超时；02:58 CST 的最新限时检查仍在 DNS 或直连 HTTPS 阶段
+超时并返回 HTTP `000`、零响应体。CUT3R 官方主仓库最新 README 仍只列相同 Drive
+文件。对两个官方 GitHub 仓库的 issue/release 元数据检查没有发现权重
 release 或已确认的替代入口；CUT3R 仓库 contributor 链接的 Hugging Face 仓库只明确
 用于处理后数据，不能据此推断存在模型。Project2 范围及扩展至 `/data/wangzheng` 的
 本地只读查重均没有找到真实文件、`.part` 或 `.partial`。没有使用第三方镜像。官方未
@@ -147,11 +191,11 @@ release 或已确认的替代入口；CUT3R 仓库 contributor 链接的 Hugging
 不能单独认证来源。224 Linear fallback 也不存在；即使取得，它也只能做 `--size 224` 接口
 smoke，不能替代 512 final baseline 或正式指标。
 
-最近一次已登记 GPU 检查（2026-08-01 02:17 CST）显示 8 张 L20 均有既有 compute
-process，显存占用约为 `21038, 30854, 21175, 18909, 24651, 26139, 25247, 41495 MiB`，
+最近一次 GPU 检查（2026-08-01 03:14 CST）显示 8 张 L20 均有既有 compute
+process，显存占用约为 `395, 30854, 8592, 18909, 24651, 26139, 25249, 41495 MiB`，
 没有一张卡满足完全空闲规则。未停止或修改任何他人进程，也没有启动 CUDA。GPU 状态会
 变化；在新的启动前检查明确找到完全空闲卡之前，GPU gate 继续视为阻塞。同期 `/data`
-剩余约 513 GiB（使用率 97%），仍不允许无门禁扩展下载或重复输出。
+剩余约 506 GiB（使用率 97%），仍不允许无门禁扩展下载或重复输出。
 
 因此下列真实证据全部尚未获得：
 
@@ -170,8 +214,8 @@ process，显存占用约为 `21038, 30854, 21175, 18909, 24651, 26139, 25247, 4
 | Gate | 状态 | 证据与约束 |
 |---|---|---|
 | 官方来源、固定 commit、许可证与环境隔离 | **PASS** | 上游固定、CPU import、环境 freeze 与依赖检查已完成 |
-| Corruption/Health/Detection 实现与单元测试 | **PASS（软件层）** | 170 tests passed；不等于模型或科研验证 |
-| Synthetic v1/moving-occlusion metadata/detection CLI 闭环 | **PASS（开发层，有限）** | `synthetic-smoke-0003` 可重复生成并通过 strict loader，遮挡坐标逐帧移动；本次未 materialize 像素，且非 formal、非模型/真实实验 |
+| Corruption/Health/Detection 实现与单元测试 | **PASS（软件层）** | 174 tests passed；不等于模型或科研验证 |
+| Synthetic v1 metadata/detection + CPU pixel materialization | **PASS（开发层，有限）** | 0003 可重复生成并通过 strict loader；独立审计证明五帧遮挡像素逐帧移动、源图只读；非 formal、非模型/真实实验 |
 | 官方 512 checkpoint | **BLOCKED** | 官方入口不可达，本地无真实文件，未使用第三方来源 |
 | 完全空闲单卡 | **BLOCKED** | 最新登记快照无合规空闲卡；每次启动前必须重查并显式绑定单卡 |
 | Gate 0：Chateau 两图真实 ReCal3R smoke | **BLOCKED / NOT RUN** | CPU preprocessing 通过；checkpoint load、CUDA forward、一次 update 未发生 |

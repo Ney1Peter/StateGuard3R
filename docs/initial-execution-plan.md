@@ -321,7 +321,7 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] 已阅读服务器规则和研究计划。
 - [x] 已确认 StateGuard3R 初始仓库工作区干净。
 - [x] 已确认 Project2 顶层当前不是 Git 仓库。
-- [x] 已确认 `/data` 最新剩余约 513 GiB、使用率 97%，必须限制下载和重复输出。
+- [x] 已确认 `/data` 最新剩余约 506 GiB、使用率 97%，必须限制下载和重复输出。
 - [x] 已完成本地资源、ReCal3R 上游和最小数据方案的并行只读核查。
 - [x] 已在 `baselines/ReCal3R` 固定官方 commit `466c7cdf`，工作区干净。
 - [x] 已建立 ReCal3R 独立 `.venv`；CPU import、CUDA RoPE 编译和官方两图
@@ -330,10 +330,21 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
       Health Ledger、四方法 detection、formal freeze gate 和 SVG timeline。
 - [x] 已实现外部 ReCal3R smoke runner；会冻结两仓库 provenance、校验 checkpoint
       SHA/大小/名称/尺寸/head/weight keys，并导出 pose、pointmap residual、trace 与
-      trajectory。当前全套测试为 170 passed。
+      trajectory。当前全套测试为 174 passed。
+- [x] 已完成 Gate 0 runner readiness 加固：允许并审计 pinned model 的
+      `load_state_dict` 委托 override（`8f6360c` / `e2d5f86`）；按来源文件及 SHA
+      冻结官方 relpose 赋值语义，并为本 smoke 显式选择 `recal3r` / `beta_base=0.1`
+      （`59a1eac` / `8bf6154`）；冻结实际 cuRoPE `.so` 的绝对
+      路径、9,523,120-byte 大小和 SHA-256（`2c44ea8` / `483ade1`）。CPU pinned
+      interface/provenance 检查已通过，但没有初始化 CUDA，也没有执行真实 kernel、
+      checkpoint load 或模型 forward。
 - [x] 已完成 v1 synthetic 闭环；`synthetic-smoke-0003` 在干净 tracked commit
       `08e59d0` 上使用非零遮挡速度，取代 0002 作为当前管线证据。它不是
       ReCal3R 实验结果。
+- [x] 已在干净提交 `483ade1` 上完成 0003 的 CPU-only 像素 materialization
+      审计：官方 loader 后的 60 帧均为独立 `1x3x384x512` tensor，五帧移动遮挡逐像素
+      符合协议，输入 tensor 和 Chateau 源文件未变，且 CUDA 未初始化。两图 fixture
+      只能证明路由与像素执行，不能证明真实 corruption 强度、模型响应或科研指标。
 - [x] 已限制数据范围：截至 2026-08-01 没有下载数据集，也没有启动 GPU 任务。
 - [ ] 官方 512 DPT checkpoint 尚未取得；三个官方 Google 下载入口仍超时，且没有
       使用第三方镜像或留下 partial 文件。

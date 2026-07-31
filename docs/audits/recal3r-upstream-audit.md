@@ -616,6 +616,27 @@ runner 在反序列化前后复核 checkpoint、manifest、source manifest 和�
 输出仅包含轻量审计材料：`run.json`、`checkpoint-load-audit.json`、逐帧
 `health.jsonl`、`trajectory.json` 和 tensor shape/finite 摘要；不保存完整 pointmap。
 
+Gate 0 readiness 还完成了以下三组加固；这些提交只强化 runner 的执行前契约，不能
+替代真实 checkpoint、CUDA kernel 或模型 forward 证据：
+
+- `8f6360c` / `e2d5f86`：允许 pinned `ARCroco3DStereo.load_state_dict`
+  override，并审计它委托给 `torch.nn.Module` 基类后返回的真实 compatibility result；
+  非委托 override 仍会被拒绝，且已有委托、旁路与方法恢复测试。
+- `59a1eac` / `8bf6154`：按官方 relpose launcher 同时冻结 model/config 的
+  `model_update_type=recal3r`、`beta_base=0.1`、`entropy_eps=2e-14`、
+  `entropy_head_reduce=mean`、`uncertainty_clamp_max=1.0` 和 `decay=0.95`。
+  官方语义来源固定为
+  `/data/wangzheng/Project2/baselines/ReCal3R/eval/relpose/launch.py`：CLI 选择及
+  `beta_base` 解析见第 143–153、190–193、533 行，model/config 赋值与其余常量见
+  第 730–742 行。上游 `model_update_type` 默认仍是 `cut3r`；这里的 `recal3r` 与
+  `0.1` 是 runner 为本 smoke 显式选择的值，不是上游默认值。来源文件 SHA-256 为
+  `22a9b918801beb06847c7c1ad1b12cf99830f81158a9b2e8f9ab9b8c1f6aac1f`。
+- `2c44ea8` / `483ade1`：runner 会拒绝 baseline 目录外的扩展，并冻结实际解析到的
+  `/data/wangzheng/Project2/baselines/ReCal3R/src/croco/models/curope/curope.cpython-311-x86_64-linux-gnu.so`；
+  该文件为 9,523,120 bytes，SHA-256 为
+  `3bd89991bcebb9501da085f4722c55fd5ef48aa38936608ef986072313d9aede`，对应路径、
+  大小、哈希与越界拒绝测试均已加入。
+
 输出级信号固定为：
 
 - `pose_jump = hypot(relative_translation_l2, relative_rotation_angle_rad)`；
@@ -627,9 +648,11 @@ runner 在反序列化前后复核 checkpoint、manifest、source manifest 和�
 - `oracle_window=1` 的恒零 `err` 不进入 health，更新量来自同帧
   `global_state_delta`；未实现的 overlap 保留 `null`。
 
-截至 2026-08-01 01:14 CST，runner 只通过单元/接口验证，尚未执行真实模型
-forward：官方 Google Drive 权重入口仍连接超时，且八张 GPU 都有既有进程。
-因此本节是冻结执行契约，不是实测 ReCal3R 结果。
+截至 2026-08-01 03:14 CST，最新全套测试为 `174 passed`，CPU pinned
+interface/provenance 检查和官方两图 preprocessing 已通过；检查过程未初始化 CUDA，
+cuRoPE kernel、checkpoint load 和真实模型 forward 均未执行。官方 Google Drive 权重
+入口仍连接超时，且八张 GPU 都有既有进程。因此本节是冻结执行契约，不是实测
+ReCal3R 结果。
 
 ## 15. 主要官方资料
 
