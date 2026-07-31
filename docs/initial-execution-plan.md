@@ -2,7 +2,7 @@
 
 日期：2026-07-31
 
-状态：执行中
+状态：执行中；Gate 0 为 HOLD / evidence pending
 
 预计持续时间：12–24 小时（包含环境安装、最小数据获取、GPU 推理和评测；若上游依赖编译或网络较慢，实际墙钟时间可能更长）
 
@@ -321,10 +321,23 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] 已阅读服务器规则和研究计划。
 - [x] 已确认 StateGuard3R 初始仓库工作区干净。
 - [x] 已确认 Project2 顶层当前不是 Git 仓库。
-- [x] 已确认 `/data` 剩余约 552 GB，但使用率已达 96%，必须限制下载和重复输出。
+- [x] 已确认 `/data` 当前剩余约 515 GiB、使用率 97%，必须限制下载和重复输出。
 - [x] 已完成本地资源、ReCal3R 上游和最小数据方案的并行只读核查。
 - [x] 已在 `baselines/ReCal3R` 固定官方 commit `466c7cdf`，工作区干净。
-- [ ] 尚未下载数据或权重。
-- [ ] 尚未启动 GPU 任务。
+- [x] 已建立 ReCal3R 独立 `.venv`；CPU import、CUDA RoPE 编译和官方两图
+      preprocessing 已通过。
+- [x] 已实现并测试 corruption manifest v1、三类 corruption、只读 replay、
+      Health Ledger、四方法 detection、formal freeze gate 和 SVG timeline。
+- [x] 已实现外部 ReCal3R smoke runner；会冻结两仓库 provenance、校验 checkpoint
+      SHA/大小/名称/尺寸/head/weight keys，并导出 pose、pointmap residual、trace 与
+      trajectory。当前全套测试为 170 passed。
+- [x] 已在干净 commit `f0b2748` 上完成 `synthetic-smoke-0002`；它仅证明 CLI
+      管线，不是 ReCal3R 实验结果。
+- [x] 已限制数据范围：截至 2026-08-01 没有下载数据集，也没有启动 GPU 任务。
+- [ ] 官方 512 DPT checkpoint 尚未取得；三个官方 Google 下载入口仍超时，且没有
+      使用第三方镜像或留下 partial 文件。
+- [ ] 真实两图 forward 尚未启动；八张 L20 均有既有进程，没有符合规则的空闲卡。
+- [ ] 真实 clean/corruption Health Ledger、formal holdout 指标和科研 Go/No-Go
+      尚无证据，因此 TUM 下载、quarantine 和 rollback 继续禁入。
 
 状态更新规则：每完成一个阶段，立即更新本节、运行登记和验证结果；只有满足上一阶段门槛才推进下一阶段。
