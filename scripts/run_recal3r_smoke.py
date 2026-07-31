@@ -42,6 +42,10 @@ SUPPORTED_CHECKPOINT_HEAD_CLASSES = {
     "cut3r_224_linear_4.pth": "LinearPts3dPose",
     "cut3r_512_dpt_4_64.pth": "DPTPts3dPose",
 }
+OFFICIAL_RECAL3R_ENTROPY_EPS = 2e-14
+OFFICIAL_RECAL3R_ENTROPY_HEAD_REDUCE = "mean"
+OFFICIAL_RECAL3R_UNCERTAINTY_CLAMP_MAX = 1.0
+OFFICIAL_RECAL3R_DECAY = 0.95
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -592,6 +596,28 @@ def _validate_model_interface(model: Any, checkpoint_name: str) -> dict[str, Any
     }
 
 
+def _configure_official_recal3r_runtime(
+    model: Any, *, beta_base: float
+) -> dict[str, Any]:
+    """Apply the runtime parameters frozen by the official relpose launcher."""
+
+    config = getattr(model, "config", None)
+    if config is None:
+        raise RuntimeError("loaded checkpoint model does not expose config")
+    frozen = {
+        "model_update_type": "recal3r",
+        "beta_base": float(beta_base),
+        "entropy_eps": OFFICIAL_RECAL3R_ENTROPY_EPS,
+        "entropy_head_reduce": OFFICIAL_RECAL3R_ENTROPY_HEAD_REDUCE,
+        "uncertainty_clamp_max": OFFICIAL_RECAL3R_UNCERTAINTY_CLAMP_MAX,
+        "decay": OFFICIAL_RECAL3R_DECAY,
+    }
+    for target in (model, config):
+        for name, value in frozen.items():
+            setattr(target, name, value)
+    return frozen
+
+
 def _load_model_with_state_dict_audit(
     model_class: Any,
     checkpoint: Path,
@@ -879,9 +905,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     loaded_model_interface = _validate_model_interface(model, args.checkpoint.name)
     model = model.to(args.device)
-    model.config.model_update_type = "recal3r"
-    model.beta_base = args.beta_base
-    model.config.beta_base = args.beta_base
+    recal3r_runtime_config = _configure_official_recal3r_runtime(
+        model,
+        beta_base=args.beta_base,
+    )
+    runtime_config_source = args.baseline_root / "eval" / "relpose" / "launch.py"
+    runtime_config_source_provenance = {
+        "path": str(runtime_config_source),
+        "sha256": _sha256(runtime_config_source),
+        "size_bytes": runtime_config_source.stat().st_size,
+        "pinned_lines": "730-742",
+    }
     model.eval()
     model.enable_u_calibration_trace(oracle_window=1)
 
@@ -1013,6 +1047,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "loaded_model_interface": loaded_model_interface,
         "checkpoint_state_dict": checkpoint_state_dict,
         "beta_base": args.beta_base,
+        "recal3r_runtime_config": recal3r_runtime_config,
+        "recal3r_runtime_config_source": runtime_config_source_provenance,
         "model_eval": not model.training,
         "calibrated_update_calls": update_calls,
         "expected_calibrated_update_calls": expected_updates,
