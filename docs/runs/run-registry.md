@@ -106,6 +106,26 @@ index was `7755, 30854, 1195, 18909, 24651, 26139, 25247, 41495` MiB. GPU 2
 remained the least occupied but still had another user's process, so it did not
 pass the empty-card rule. No process was stopped or modified.
 
+### SETUP-0007: Final pre-report Gate 0 resource recheck
+
+- Time: 2026-08-01 02:17 CST
+- Result: both external blockers remain; no CUDA context or download started
+- `/data` free space: about 513 GiB (97% used)
+
+A Project2-scoped filename search, excluding pytest fixtures, again found no
+real `cut3r_*.pth` checkpoint and no `.part`/`.partial` file. The official 512
+Google Drive URL was probed once with an HTTP HEAD request bounded by an
+8-second connection timeout and 15-second total timeout; DNS resolution timed
+out and returned HTTP code `000`, with zero response-body bytes. No third-party
+source was contacted. The pinned ReCal3R worktree remained clean at
+`466c7cdf3acd2f589f1d82e5f6391966f19db9ff`.
+
+Every L20 still had at least one existing compute process. Approximate memory
+use by index was `21038, 30854, 21175, 18909, 24651, 26139, 25247, 41495` MiB,
+so no card met the empty-card rule. A task-path process sweep and listening-port
+check found no long-lived StateGuard3R/ReCal3R process or service owned by this
+work. No existing process was changed.
+
 ## Development pipeline records
 
 ### DEV-SYNTH-0001: Original synthetic CLI smoke
@@ -188,6 +208,44 @@ timeline.svg             3bf67fb6fc0e65d7a240de418fa7430bd674a2cd82f465ec3087d83
 The metrics' embedded health/corruption snapshot hashes match the files above;
 the SVG parsed successfully. ReCal3R was not loaded or run, and none of these
 numbers is evidence about real corruption detection.
+
+Post-run audit found that this smoke's declared dynamic occlusion used
+`dx=dy=0`, so its rectangle was static. The v1 coordinate contract is valid,
+but `DEV-SYNTH-0003` supersedes it as the current moving-occlusion pipeline
+evidence.
+
+### DEV-SYNTH-0003: Moving-occlusion synthetic CLI smoke
+
+- Status: succeeded; current synthetic pipeline evidence
+- Time: 2026-08-01 02:13–02:14 CST
+- Repository commit: `08e59d0f43c7ec0af7e48d487215b29c000ec39a`
+- Output: `outputs/synthetic-smoke-0003` (128 KiB; no raster copies)
+- Manifest schema: `stateguard3r.corruption.v1`
+- Detection execution mode: exploratory, not formal
+
+This run repeated the 0002 command sequence in a new directory after freezing
+non-zero occlusion velocity `dx=0.04`, `dy=0.025`. The five normalized rectangle
+origins were `(0.25,0.25)`, `(0.29,0.275)`, `(0.33,0.30)`, `(0.37,0.325)`, and
+`(0.41,0.35)`, proving that replay metadata changes on every occluded frame.
+There were still 60 frames and three disjoint five-frame corruption intervals.
+
+The synthetic health fixture did not change, so overall synthetic-only metrics
+remained identical to 0002: combined, update-only, and reliability-only had
+AUROC/F1 1.0, FPR 0, and mean delay 0; random had AUROC 0.5659259259, F1
+0.3829787234, FPR 0.5111111111, and mean delay 0.3333333333. This equality is
+expected and is not evidence that pixels were processed by ReCal3R.
+
+```text
+source_manifest.json     55bab88af20e7fd21e7b13b77c34d100e2e6fd75ad6c708dceb11b38f9a17e41
+corruption_specs.json    ec0327f7424889354dea8743b0d7b2a30e0b277ddbb3410764949c7b3d2cbb10
+health.jsonl             c725772db7761a92cc019adb6170a983bc39c01e60e5116091fb08c210b4d525
+corruption_manifest.json 864133efe020a024674f49ca3c0eaaa5a6a84ee45422e492bc14bdaba11657f2
+metrics.json             afe496ebbd285ffb95dbb2cdfb940e136d3451f941fe1d642d12efc3bd2ae051
+timeline.svg             f9bc651def0d97cad33ed101b2efc6d458c6671629772ed245a1a7ee926e0bea
+```
+
+The embedded health/corruption snapshot hashes matched, the SVG parsed, and
+both Chateau source hashes remained unchanged.
 
 ### GATE0-REAL-0001: Official ReCal3R two-image smoke
 

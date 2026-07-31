@@ -321,7 +321,7 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] 已阅读服务器规则和研究计划。
 - [x] 已确认 StateGuard3R 初始仓库工作区干净。
 - [x] 已确认 Project2 顶层当前不是 Git 仓库。
-- [x] 已确认 `/data` 当前剩余约 515 GiB、使用率 97%，必须限制下载和重复输出。
+- [x] 已确认 `/data` 最新剩余约 513 GiB、使用率 97%，必须限制下载和重复输出。
 - [x] 已完成本地资源、ReCal3R 上游和最小数据方案的并行只读核查。
 - [x] 已在 `baselines/ReCal3R` 固定官方 commit `466c7cdf`，工作区干净。
 - [x] 已建立 ReCal3R 独立 `.venv`；CPU import、CUDA RoPE 编译和官方两图
@@ -331,8 +331,9 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] 已实现外部 ReCal3R smoke runner；会冻结两仓库 provenance、校验 checkpoint
       SHA/大小/名称/尺寸/head/weight keys，并导出 pose、pointmap residual、trace 与
       trajectory。当前全套测试为 170 passed。
-- [x] 已在干净 commit `f0b2748` 上完成 `synthetic-smoke-0002`；它仅证明 CLI
-      管线，不是 ReCal3R 实验结果。
+- [x] 已完成 v1 synthetic 闭环；`synthetic-smoke-0003` 在干净 tracked commit
+      `08e59d0` 上使用非零遮挡速度，取代 0002 作为当前管线证据。它不是
+      ReCal3R 实验结果。
 - [x] 已限制数据范围：截至 2026-08-01 没有下载数据集，也没有启动 GPU 任务。
 - [ ] 官方 512 DPT checkpoint 尚未取得；三个官方 Google 下载入口仍超时，且没有
       使用第三方镜像或留下 partial 文件。

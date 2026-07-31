@@ -43,4 +43,6 @@ that the coordinate contract is recorded and validated.
 artifact. Its manifest is labelled v0 even though it was produced while the
 coordinate-reference field was being introduced, so it is not accepted by the
 current loader and must not be cited as a current reproducible run. A fresh
-`synthetic-smoke-0002` run should be used for v1 pipeline evidence.
+`synthetic-smoke-0002` first validated v1 but used a zero-velocity occlusion.
+`synthetic-smoke-0003` uses non-zero motion and is the current v1 pipeline
+evidence; both remain synthetic fixtures, not ReCal3R experiment results.
