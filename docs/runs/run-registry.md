@@ -52,7 +52,7 @@ The final `uv pip check` passed and `dust3r.model` imported from the expected
 
 ### SETUP-0003: Acquire the official CUT3R checkpoint
 
-- Time: 2026-07-31 21:30–21:43 CST
+- Time: 2026-07-31 21:30–23:00 CST
 - Official file ID: `1Asz-ZB3FfpzZYwunhQvNPZEUA8XUNAYD`
 - Intended target: `baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth`
 - Result: pending; official Google Drive endpoint timed out
@@ -61,6 +61,25 @@ The final `uv pip check` passed and `dust3r.model` imported from the expected
 
 This network failure blocks real checkpoint loading but does not block the
 independent corruption, health-ledger, and detection-only implementation work.
+
+A second read-only connectivity check at approximately 22:40 CST used the same
+official file ID and `drive.google.com` download endpoint. DNS resolution or
+connection establishment again timed out within the bounded request timeout.
+Checks against the official CUT3R GitHub README and GitHub Releases API found
+the same Google Drive source and no GitHub release asset for this checkpoint.
+No checkpoint download was started and no partial file was created.
+
+### SETUP-0004: Recheck GPU availability before any CUDA execution
+
+- Time: 2026-07-31 23:08 CST
+- Result: no completely idle GPU; no CUDA process started
+
+All eight NVIDIA L20 cards had an existing compute process and non-zero memory
+use. GPU 2 was the least occupied at about 1.2 GiB, but it still belonged to an
+existing `/data/jiale/.../python` process and therefore did not satisfy the
+server rule requiring a completely idle card. No process was stopped or
+modified. The next CUDA attempt must repeat this check and bind an eligible card
+with an explicit `CUDA_VISIBLE_DEVICES` value.
 
 ## Experiment record template
 
