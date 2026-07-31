@@ -153,7 +153,13 @@ The standalone Python loader functions keep their existing interfaces.
 ## Current signal boundary
 
 The upstream ReCal3R trace directly supplies uncertainty/reliability, attention
-entropy, and—when enabled—global-state delta. It does not directly supply
-overlap, pose jump, or a geometric residual in the current wrapper. Until those
-signals are measured by a real logger, their ledger fields remain JSON `null`;
-no proxy value is fabricated.
+entropy, and—when enabled—global-state delta. The frozen external smoke runner
+also derives a relative SE(3) pose jump and an independent cross-head pointmap
+consistency residual from model outputs; it records their exact formulas and
+first-frame reference in `trajectory.json`. Overlap remains unavailable and is
+kept as JSON `null`.
+
+As of 2026-08-01 these output-level signals have unit coverage but no real
+checkpoint forward evidence. They become measured inputs only after the
+official checkpoint and clean GPU gates pass. Synthetic values remain pipeline
+fixtures and must not be reported as ReCal3R measurements.

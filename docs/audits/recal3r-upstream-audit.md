@@ -547,11 +547,13 @@ Relpose 允许数据集过滤：
 1. 验证本地副本仍固定在 commit 466c7cdf3acd2f589f1d82e5f6391966f19db9ff。
 2. 建立独立环境，补齐缺失依赖并保存 freeze。
 3. 只下载官方单个 CUT3R checkpoint，记录大小和 SHA-256。
-4. 用 4–8 张图片验证显式 recal3r demo 主路径。
+4. 先用仓库内两张 Chateau 图片验证显式 recal3r 主路径和恰好一次 calibrated update，再扩到 4–8 帧。
 5. 用单条 TUM-Dynamics、16 帧以内运行 relpose，记录 FPS 和峰值显存。
 6. 启用 enable_u_calibration_trace(oracle_window=1)，确认 uncertainty、entropy、delta 与 frame id 对齐。
-7. 在 _compute_recal3r_update_mask 返回前加入 detached scalar hook。
-8. 验证 logger 开关前后输出一致，再开始 clean/corruption detection-only 实验。
+7. 由外部 smoke wrapper 统计 `_compute_recal3r_update_mask` 调用次数；使用
+   `oracle_window=1` 只导出同帧 global-state delta，不把此时恒为零的
+   oracle error 当作几何残差，也不修改上游源码。
+8. 验证 trace 开关前后输出一致，再开始 clean/corruption detection-only 实验。
 
 在完成以上门槛之前，不进入：
 
@@ -560,6 +562,74 @@ Relpose 允许数据集过滤：
 - 每帧完整 state snapshot；
 - quarantine/rollback；
 - 多卡或多进程批量评测。
+
+### 14.1 224 Linear 权重的受限 fallback
+
+官方 CUT3R 还列出 `cut3r_224_linear_4.pth`（Google Drive ID
+`11dAgFkWHpaOHsR6iuitlB_v4NFFBrWjy`）。2026-07-31 的只读核查确认
+`/data/wangzheng` 当前没有该文件，因此本轮没有实载。
+
+官方页面没有发布可独立核对的 SHA-256。未来实载时，runner 要求操作者先计算
+并显式传入 SHA-256，同时记录字节数；这只能证明同一文件在验证、加载和运行收尾
+之间没有变化，不能认证文件来源。来源认证仍依赖从上述官方链接获取、保留下载
+记录，并核对 checkpoint 文件名和模型结构。
+
+静态接口上，它可在未来作为 `--size 224 --model_update_type recal3r` 的两图
+smoke fallback：ReCal3R 从 checkpoint 自身的 `ckpt["args"].model` 实例化，
+更新路径没有 512 或 DPT head 硬编码。但官方将 224 Linear 标为 intermediate
+checkpoint，而 512 DPT 4–64 才是 final checkpoint，也是 ReCal3R README 唯一
+指定的权重。因此 224 只能验证加载、forward、trace 和调用次数，不能替代 512
+baseline、不能混报正式指标，也不能作为长序列结论。实载时 runner 会捕获
+`strict=False` 的返回值；当前 v0 门禁不设白名单，任何 missing/unexpected key
+都会留下 `checkpoint-load-audit.json` 并终止运行。
+
+官方依据：
+
+- <https://github.com/CUT3R/CUT3R/blob/8bc15dc92a6d7fd92920b4ec81540d3dec7d3ecf/README.md#download-checkpoints>
+- <https://github.com/CUT3R/CUT3R/blob/8bc15dc92a6d7fd92920b4ec81540d3dec7d3ecf/config/linear_224_fixed_16.yaml>
+
+### 14.2 外部 smoke runner 的冻结契约
+
+StateGuard3R 使用 `scripts/run_recal3r_smoke.py`，不修改 pinned baseline。正式
+两图入口必须从 StateGuard3R 干净 commit 启动，并使用 ReCal3R 自己的 `.venv`：
+
+```bash
+cd /data/wangzheng/Project2/StateGuard3R
+TMPDIR=/data/wangzheng/Project2/StateGuard3R/tmp \
+CUDA_VISIBLE_DEVICES=GPU_ID \
+/data/wangzheng/Project2/baselines/ReCal3R/.venv/bin/python \
+  scripts/run_recal3r_smoke.py \
+  --baseline-root /data/wangzheng/Project2/baselines/ReCal3R \
+  --checkpoint /data/wangzheng/Project2/baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth \
+  --checkpoint-sha256 SHA256 \
+  --image /data/wangzheng/Project2/baselines/ReCal3R/src/croco/assets/Chateau1.png \
+  --image /data/wangzheng/Project2/baselines/ReCal3R/src/croco/assets/Chateau2.png \
+  --output-dir /data/wangzheng/Project2/StateGuard3R/outputs/RUN_ID \
+  --device cuda --size 512 --seed 0 --beta-base 0.1
+```
+
+其中 `GPU_ID`、`SHA256` 和 `RUN_ID` 必须在启动前替换为当次核验值。
+
+runner 在反序列化前后复核 checkpoint、manifest、source manifest 和输入图哈希，
+断言 baseline commit/模块来源、StateGuard3R commit/脚本哈希、独立解释器、权重 key
+兼容性、checkpoint 名称—尺寸—head 类契约，并要求两图恰好一次 calibrated update。
+输出仅包含轻量审计材料：`run.json`、`checkpoint-load-audit.json`、逐帧
+`health.jsonl`、`trajectory.json` 和 tensor shape/finite 摘要；不保存完整 pointmap。
+
+输出级信号固定为：
+
+- `pose_jump = hypot(relative_translation_l2, relative_rotation_angle_rad)`；
+- `geometric_residual = median(||T_pose(p_self)-p_cross||) /
+  max(median(||p_cross||), 1e-8)`；
+- pose matrix 是当前相机到最终输入第 0 帧参考坐标系，不宣称绝对 world/GT；
+- 512 DPT 的 `DPTPts3dPose` 与 224 Linear 的 `LinearPts3dPose` 都使用独立
+  cross head；runner 会核对实际类名后才计算 residual；
+- `oracle_window=1` 的恒零 `err` 不进入 health，更新量来自同帧
+  `global_state_delta`；未实现的 overlap 保留 `null`。
+
+截至 2026-08-01 01:14 CST，runner 只通过单元/接口验证，尚未执行真实模型
+forward：官方 Google Drive 权重入口仍连接超时，且八张 GPU 都有既有进程。
+因此本节是冻结执行契约，不是实测 ReCal3R 结果。
 
 ## 15. 主要官方资料
 
