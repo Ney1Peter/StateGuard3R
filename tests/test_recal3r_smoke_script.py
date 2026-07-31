@@ -493,12 +493,17 @@ def test_checkpoint_loader_captures_and_restores_state_dict_audit(tmp_path) -> N
     original_load = FakeModule.load_state_dict
 
     class FakeModel(FakeModule):
+        def load_state_dict(self, state_dict, strict=True):
+            return super().load_state_dict(state_dict, strict=strict)
+
         @classmethod
         def from_pretrained(cls, path):
             assert path == str(tmp_path / "checkpoint.pth")
             model = cls()
             model.load_state_dict({}, strict=False)
             return model
+
+    original_model_load = FakeModel.load_state_dict
 
     model, audit = _load_model_with_state_dict_audit(
         FakeModel,
@@ -514,6 +519,33 @@ def test_checkpoint_loader_captures_and_restores_state_dict_audit(tmp_path) -> N
         "unexpected_keys": ["legacy.weight"],
     }
     assert FakeModule.load_state_dict is original_load
+    assert FakeModel.load_state_dict is original_model_load
+
+
+def test_checkpoint_loader_rejects_non_delegating_model_override(tmp_path) -> None:
+    class FakeModule:
+        def load_state_dict(self, state_dict, strict=True):
+            del state_dict, strict
+            return SimpleNamespace(missing_keys=[], unexpected_keys=[])
+
+    class FakeModel(FakeModule):
+        def load_state_dict(self, state_dict, strict=True):
+            del state_dict, strict
+            return SimpleNamespace(missing_keys=[], unexpected_keys=[])
+
+        @classmethod
+        def from_pretrained(cls, path):
+            assert path == str(tmp_path / "checkpoint.pth")
+            model = cls()
+            model.load_state_dict({}, strict=False)
+            return model
+
+    with pytest.raises(RuntimeError, match="observed 0"):
+        _load_model_with_state_dict_audit(
+            FakeModel,
+            tmp_path / "checkpoint.pth",
+            SimpleNamespace(nn=SimpleNamespace(Module=FakeModule)),
+        )
 
 
 def test_runner_provenance_requires_clean_tracked_commit(
