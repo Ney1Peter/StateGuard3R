@@ -38,6 +38,7 @@ from typing import Any
 
 SCHEMA_VERSION = "stateguard3r.corruption.v0"
 DEFAULT_SEED = 0
+RECTANGLE_COORDINATE_REFERENCE = "model_input_after_resize_and_center_crop"
 SUPPORTED_CORRUPTIONS = (
     "low_overlap_jump",
     "dynamic_occlusion",
@@ -438,6 +439,7 @@ def _apply_dynamic_occlusion(
             {
                 "type": "rectangle_occlusion",
                 "coordinate_space": "normalized",
+                "coordinate_reference": RECTANGLE_COORDINATE_REFERENCE,
                 "rectangle": copy.deepcopy(exact_rectangle),
                 "fill": copy.deepcopy(fill),
             }
@@ -445,6 +447,7 @@ def _apply_dynamic_occlusion(
 
     return {
         "coordinate_space": "normalized",
+        "coordinate_reference": RECTANGLE_COORDINATE_REFERENCE,
         "initial_rectangle": rectangle,
         "velocity": velocity,
         "fill": fill,

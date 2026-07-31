@@ -137,6 +137,8 @@ def test_all_three_corruptions_have_labels_and_deferred_transforms(
     assert all(
         transform["type"] == "rectangle_occlusion"
         and transform["coordinate_space"] == "normalized"
+        and transform["coordinate_reference"]
+        == "model_input_after_resize_and_center_crop"
         and transform["fill"] == [7, 8, 9]
         for transform in rectangle_transforms
     )
