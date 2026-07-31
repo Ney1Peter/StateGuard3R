@@ -186,7 +186,7 @@ def _build_corruption_config() -> dict[str, Any]:
                         "width": 0.5,
                         "height": 0.5,
                     },
-                    "velocity": {"dx": 0.0, "dy": 0.0},
+                    "velocity": {"dx": 0.04, "dy": 0.025},
                     "fill": [255, 0, 0],
                 },
             },
