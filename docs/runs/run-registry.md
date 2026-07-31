@@ -30,6 +30,38 @@ Actions and observations:
 
 No dataset, checkpoint, environment, or GPU task was created during this setup.
 
+### SETUP-0002: Create the isolated ReCal3R environment
+
+- Time: 2026-07-31 19:35–21:30 CST
+- Repository: `/data/wangzheng/Project2/baselines/ReCal3R`
+- Git commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Result: environment and CPU import checks succeeded
+- Python: 3.11.14
+- PyTorch: 2.4.0+cu121
+- torchvision: 0.19.0+cu121
+- CUDA toolkit used for RoPE build: `/usr/local/cuda-12.1`
+- Environment: `/data/wangzheng/Project2/baselines/ReCal3R/.venv`
+- Full freeze: `docs/runs/recal3r-environment-freeze.txt`
+- GPU work: not started
+
+The first dependency resolution installed incompatible newest versions of
+transformers, gradio, viser, and websockets. The compatible pins and actual
+failure evidence are recorded in `docs/audits/recal3r-environment-audit.md`.
+The final `uv pip check` passed and `dust3r.model` imported from the expected
+`src/dust3r/model.py` path.
+
+### SETUP-0003: Acquire the official CUT3R checkpoint
+
+- Time: 2026-07-31 21:30–21:43 CST
+- Official file ID: `1Asz-ZB3FfpzZYwunhQvNPZEUA8XUNAYD`
+- Intended target: `baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth`
+- Result: pending; official Google Drive endpoint timed out
+- Partial file left behind: no
+- Third-party mirror used: no
+
+This network failure blocks real checkpoint loading but does not block the
+independent corruption, health-ledger, and detection-only implementation work.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
