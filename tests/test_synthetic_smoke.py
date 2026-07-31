@@ -72,6 +72,10 @@ def test_generator_writes_marked_deterministic_inputs_without_copying_sources(
     assert [spec["type"] for spec in config["corruptions"]] == [
         item[0] for item in CORRUPTION_INTERVALS
     ]
+    assert config["corruptions"][1]["parameters"]["velocity"] == {
+        "dx": 0.04,
+        "dy": 0.025,
+    }
     target_sets = [
         set(range(spec["start"], spec["end"] + 1))
         for spec in config["corruptions"]
@@ -187,6 +191,14 @@ def test_outputs_run_through_corruption_and_detection_clis(
     assert [item["type"] for item in corruption["corruptions"]] == [
         item[0] for item in CORRUPTION_INTERVALS
     ]
+    occlusion = corruption["corruptions"][1]["parameters"]
+    assert occlusion["velocity"] == {"dx": 0.04, "dy": 0.025}
+    assert len(
+        {
+            (rectangle["x"], rectangle["y"])
+            for rectangle in occlusion["frame_rectangles"]
+        }
+    ) == 5
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert metrics["frame_count"] == FRAME_COUNT
     assert metrics["positive_frames"] == 15
