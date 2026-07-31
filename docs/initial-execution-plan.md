@@ -322,8 +322,8 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] 已确认 StateGuard3R 初始仓库工作区干净。
 - [x] 已确认 Project2 顶层当前不是 Git 仓库。
 - [x] 已确认 `/data` 剩余约 552 GB，但使用率已达 96%，必须限制下载和重复输出。
-- [ ] 正在并行核查本地资源、ReCal3R 上游和最小数据方案。
-- [ ] 尚未克隆 baseline。
+- [x] 已完成本地资源、ReCal3R 上游和最小数据方案的并行只读核查。
+- [x] 已在 `baselines/ReCal3R` 固定官方 commit `466c7cdf`，工作区干净。
 - [ ] 尚未下载数据或权重。
 - [ ] 尚未启动 GPU 任务。
 
