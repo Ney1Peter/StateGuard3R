@@ -91,6 +91,7 @@ def test_all_three_corruptions_have_labels_and_deferred_transforms(
 
     assert source == source_before
     assert _file_state(frame_paths) == files_before
+    assert result["schema_version"] == "stateguard3r.corruption.v1"
     assert result["source_is_read_only"] is True
     assert result["materialization"] == "deferred_transforms_no_image_copy"
     assert result["frame_count"] == len(source["frames"])
@@ -141,6 +142,9 @@ def test_all_three_corruptions_have_labels_and_deferred_transforms(
         == "model_input_after_resize_and_center_crop"
         and transform["fill"] == [7, 8, 9]
         for transform in rectangle_transforms
+    )
+    assert result["corruptions"][1]["parameters"]["coordinate_reference"] == (
+        "model_input_after_resize_and_center_crop"
     )
 
     wrong_order = [result["frames"][index]["source_index"] for index in range(8, 12)]
@@ -222,6 +226,7 @@ def test_generate_and_cli_leave_source_manifest_and_frames_unchanged(
         ground_truth_path.stat().st_mtime_ns,
     ) == ground_truth_before
     generated = json.loads(output_path.read_text(encoding="utf-8"))
+    assert generated["schema_version"] == "stateguard3r.corruption.v1"
     assert generated["source_is_read_only"] is True
     assert generated["source_manifest"] == str(source_path.resolve())
     assert generated["source_manifest_sha256"] == hashlib.sha256(

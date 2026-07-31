@@ -176,6 +176,76 @@ def _mutate_manifest(path: Path, mutation) -> None:
 
 
 @pytest.mark.parametrize(
+    "schema_version",
+    [None, "stateguard3r.corruption.v0", "stateguard3r.corruption.v2"],
+)
+def test_loader_accepts_only_current_v1_schema(
+    tmp_path: Path, schema_version: str | None
+) -> None:
+    manifest_path, _ = _generated_manifest(tmp_path)
+    _mutate_manifest(
+        manifest_path,
+        lambda payload: payload.__setitem__("schema_version", schema_version),
+    )
+
+    with pytest.raises(
+        InputManifestError,
+        match=r"expected 'stateguard3r\.corruption\.v1'",
+    ):
+        load_input_manifest(manifest_path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda transform: transform.pop("coordinate_reference"),
+            "unexpected fields",
+        ),
+        (
+            lambda transform: transform.__setitem__(
+                "coordinate_reference", "source_image_before_model_preprocessing"
+            ),
+            "unsupported coordinate reference",
+        ),
+    ],
+)
+def test_v1_requires_exact_rectangle_coordinate_reference(
+    tmp_path: Path, mutation, message: str
+) -> None:
+    manifest_path, _ = _generated_manifest(tmp_path)
+
+    def mutate_rectangle(payload):
+        mutation(payload["frames"][2]["transforms"][0])
+
+    _mutate_manifest(manifest_path, mutate_rectangle)
+    with pytest.raises(InputManifestError, match=message):
+        load_input_manifest(manifest_path)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda parameters: parameters.pop("coordinate_reference"),
+        lambda parameters: parameters.__setitem__(
+            "coordinate_reference", "source_image_before_model_preprocessing"
+        ),
+    ],
+)
+def test_v1_requires_label_coordinate_reference(
+    tmp_path: Path, mutation
+) -> None:
+    manifest_path, _ = _generated_manifest(tmp_path)
+
+    def mutate_label(payload):
+        mutation(payload["corruptions"][1]["parameters"])
+
+    _mutate_manifest(manifest_path, mutate_label)
+    with pytest.raises(InputManifestError, match="unsupported coordinate reference"):
+        load_input_manifest(manifest_path)
+
+
+@pytest.mark.parametrize(
     ("mutation", "message"),
     [
         (lambda payload: payload["frames"][1].__setitem__("frame_index", 9), "out of order"),
