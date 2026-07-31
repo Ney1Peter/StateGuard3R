@@ -8,13 +8,14 @@ frame cannot change a score already emitted by this module.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -25,6 +26,7 @@ DEFAULT_THRESHOLD = 3.0
 DEFAULT_SEED = 0
 DEFAULT_EPSILON = 1e-6
 DEFAULT_MAX_Z: float | None = None
+CALIBRATION_SCHEMA_VERSION = "stateguard3r.detection-calibration.v0"
 
 METHOD_NAMES: tuple[str, ...] = (
     "random",
@@ -853,29 +855,33 @@ def evaluate_detection(
     }
 
 
-def load_health_jsonl(path: str | Path) -> list[dict[str, Any]]:
-    """Load a health ledger, rejecting malformed or non-object JSON lines."""
-
+def _parse_health_jsonl_lines(
+    lines: Iterable[str], input_path: Path
+) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    input_path = Path(path)
-    with input_path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            try:
-                value = json.loads(line)
-            except json.JSONDecodeError as error:
-                raise ValueError(
-                    f"{input_path}:{line_number}: invalid JSON: {error.msg}"
-                ) from error
-            if not isinstance(value, dict):
-                raise ValueError(
-                    f"{input_path}:{line_number}: expected a JSON object"
-                )
-            records.append(value)
+    for line_number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"{input_path}:{line_number}: invalid JSON: {error.msg}"
+            ) from error
+        if not isinstance(value, dict):
+            raise ValueError(f"{input_path}:{line_number}: expected a JSON object")
+        records.append(value)
     if not records:
         raise ValueError(f"{input_path}: health ledger contains no records")
     return records
+
+
+def load_health_jsonl(path: str | Path) -> list[dict[str, Any]]:
+    """Load a health ledger, rejecting malformed or non-object JSON lines."""
+
+    input_path = Path(path)
+    with input_path.open("r", encoding="utf-8") as handle:
+        return _parse_health_jsonl_lines(handle, input_path)
 
 
 def load_corruption_json(path: str | Path) -> Any:
@@ -903,6 +909,197 @@ def _parse_method_threshold(value: str) -> tuple[str, float]:
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from error
     return method, threshold
+
+
+def _validated_frozen_detection_config(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    if metadata.get("schema_version") != CALIBRATION_SCHEMA_VERSION:
+        raise ValueError(
+            "development calibration config schema_version must be "
+            f"{CALIBRATION_SCHEMA_VERSION!r}"
+        )
+    if metadata.get("dataset_split") != "development":
+        raise ValueError(
+            "development calibration config dataset_split must be 'development'"
+        )
+
+    development_run_id = metadata.get("development_run_id")
+    if not isinstance(development_run_id, str) or not development_run_id.strip():
+        raise ValueError(
+            "development calibration config must contain a non-empty "
+            "development_run_id string"
+        )
+
+    frozen = metadata.get("frozen_detection_config")
+    if not isinstance(frozen, Mapping):
+        raise ValueError(
+            "development calibration config must contain a "
+            "frozen_detection_config JSON object"
+        )
+    required_fields = ("window", "seed", "epsilon", "max_z", "thresholds")
+    missing_fields = [name for name in required_fields if name not in frozen]
+    if missing_fields:
+        raise ValueError(
+            "frozen_detection_config is missing required field(s): "
+            + ", ".join(missing_fields)
+        )
+
+    window = _strict_integer(frozen["window"], name="frozen_detection_config.window")
+    if window < 1:
+        raise ValueError("frozen_detection_config.window must be at least 1")
+    seed = _strict_integer(frozen["seed"], name="frozen_detection_config.seed")
+    epsilon = _validated_threshold(
+        frozen["epsilon"], name="frozen_detection_config.epsilon"
+    )
+    if epsilon <= 0:
+        raise ValueError(
+            "frozen_detection_config.epsilon must be a positive finite number"
+        )
+
+    raw_max_z = frozen["max_z"]
+    if raw_max_z is None:
+        max_z = None
+    else:
+        max_z = _validated_threshold(
+            raw_max_z, name="frozen_detection_config.max_z"
+        )
+        if max_z <= 0:
+            raise ValueError(
+                "frozen_detection_config.max_z must be null or a positive "
+                "finite number"
+            )
+
+    raw_thresholds = frozen["thresholds"]
+    if not isinstance(raw_thresholds, Mapping):
+        raise ValueError("frozen_detection_config.thresholds must be a JSON object")
+    missing_methods = [name for name in METHOD_NAMES if name not in raw_thresholds]
+    unknown_methods = [name for name in raw_thresholds if name not in METHOD_NAMES]
+    if missing_methods or unknown_methods:
+        problems: list[str] = []
+        if missing_methods:
+            problems.append("missing method(s): " + ", ".join(missing_methods))
+        if unknown_methods:
+            problems.append("unknown method(s): " + ", ".join(unknown_methods))
+        raise ValueError(
+            "frozen_detection_config.thresholds must contain exactly the four "
+            "detection methods; " + "; ".join(problems)
+        )
+    thresholds = {
+        name: _validated_threshold(
+            raw_thresholds[name],
+            name=f"frozen_detection_config.thresholds[{name!r}]",
+        )
+        for name in METHOD_NAMES
+    }
+    return {
+        "window": window,
+        "seed": seed,
+        "epsilon": epsilon,
+        "max_z": max_z,
+        "thresholds": thresholds,
+    }
+
+
+def _load_development_calibration_provenance(
+    path: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load, validate, and fingerprint a formal development configuration."""
+
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise ValueError(
+            f"cannot read development calibration config {path}: {error}"
+        ) from error
+
+    def reject_nonfinite_constant(value: str) -> None:
+        raise ValueError(f"non-finite JSON constant {value!r} is not allowed")
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON object key {key!r} is not allowed")
+            result[key] = value
+        return result
+
+    try:
+        metadata = json.loads(
+            raw,
+            parse_constant=reject_nonfinite_constant,
+            object_pairs_hook=reject_duplicate_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        raise ValueError(
+            f"development calibration config {path} is not valid JSON: {error}"
+        ) from error
+    if not isinstance(metadata, dict) or not metadata:
+        raise ValueError(
+            "development calibration config must be a non-empty JSON object"
+        )
+    frozen = _validated_frozen_detection_config(metadata)
+
+    return (
+        {
+            "config_path": str(path.resolve()),
+            "config_sha256": hashlib.sha256(raw).hexdigest(),
+            "config": metadata,
+        },
+        frozen,
+    )
+
+
+def _verify_formal_config_matches_frozen(
+    frozen: Mapping[str, Any],
+    *,
+    window: int,
+    seed: int,
+    epsilon: float,
+    max_z: float | None,
+    thresholds: Mapping[str, float],
+) -> None:
+    runtime_values = {
+        "window": window,
+        "seed": seed,
+        "epsilon": epsilon,
+        "max_z": max_z,
+    }
+    for name, runtime_value in runtime_values.items():
+        frozen_value = frozen[name]
+        if runtime_value != frozen_value:
+            raise ValueError(
+                f"formal CLI {name}={runtime_value!r} does not match "
+                f"frozen_detection_config.{name}={frozen_value!r}"
+            )
+    for method in METHOD_NAMES:
+        runtime_threshold = thresholds[method]
+        frozen_threshold = frozen["thresholds"][method]
+        if runtime_threshold != frozen_threshold:
+            raise ValueError(
+                f"formal CLI threshold for {method}={runtime_threshold!r} does "
+                "not match frozen_detection_config.thresholds"
+                f"[{method!r}]={frozen_threshold!r}"
+            )
+
+
+def _read_cli_input_snapshot(path: Path) -> tuple[bytes, dict[str, Any]]:
+    raw = path.read_bytes()
+    return (
+        raw,
+        {
+            "absolute_path": str(path.resolve()),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "size_bytes": len(raw),
+        },
+    )
+
+
+def _parse_health_jsonl_snapshot(raw: bytes, path: Path) -> list[dict[str, Any]]:
+    text = raw.decode("utf-8")
+    return _parse_health_jsonl_lines(text.splitlines(keepends=True), path)
+
+
+def _parse_corruption_json_snapshot(raw: bytes) -> Any:
+    return json.loads(raw.decode("utf-8"))
 
 
 def _write_metrics_json_atomic(path: str | Path, result: Mapping[str, Any]) -> None:
@@ -970,6 +1167,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "different methods"
         ),
     )
+    parser.add_argument(
+        "--formal",
+        action="store_true",
+        help=(
+            "require one explicit threshold for every method and bind the run "
+            "to a development calibration config"
+        ),
+    )
+    parser.add_argument(
+        "--dev-calibration-config",
+        type=Path,
+        help=(
+            "existing non-empty JSON object documenting development-set "
+            "calibration; required with --formal"
+        ),
+    )
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--epsilon", type=float, default=DEFAULT_EPSILON)
     parser.add_argument(
@@ -982,19 +1195,91 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_arg_parser().parse_args(argv)
-    records = load_health_jsonl(args.health_jsonl)
-    corruption = load_corruption_json(args.corruption_json)
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+
+    method_thresholds: dict[str, float] = {}
+    duplicate_methods: list[str] = []
+    for method, threshold in args.method_threshold:
+        if method in method_thresholds and method not in duplicate_methods:
+            duplicate_methods.append(method)
+        method_thresholds[method] = threshold
+
+    development_calibration: dict[str, Any] | None = None
+    if args.formal:
+        if duplicate_methods:
+            parser.error(
+                "--formal rejects duplicate --method-threshold method(s): "
+                + ", ".join(duplicate_methods)
+            )
+        missing_methods = [
+            method for method in METHOD_NAMES if method not in method_thresholds
+        ]
+        if missing_methods:
+            parser.error(
+                "--formal requires an explicit --method-threshold for every "
+                "method; missing: " + ", ".join(missing_methods)
+            )
+        if args.dev_calibration_config is None:
+            parser.error("--formal requires --dev-calibration-config")
+        try:
+            (
+                development_calibration,
+                frozen_detection_config,
+            ) = _load_development_calibration_provenance(args.dev_calibration_config)
+            _verify_formal_config_matches_frozen(
+                frozen_detection_config,
+                window=args.window,
+                seed=args.seed,
+                epsilon=args.epsilon,
+                max_z=args.max_z,
+                thresholds=method_thresholds,
+            )
+        except ValueError as error:
+            parser.error(str(error))
+    elif args.dev_calibration_config is not None:
+        parser.error("--dev-calibration-config requires --formal")
+
+    health_snapshot, health_provenance = _read_cli_input_snapshot(args.health_jsonl)
+    records = _parse_health_jsonl_snapshot(health_snapshot, args.health_jsonl)
+    corruption_snapshot, corruption_provenance = _read_cli_input_snapshot(
+        args.corruption_json
+    )
+    corruption = _parse_corruption_json_snapshot(corruption_snapshot)
     result = evaluate_detection(
         records,
         corruption,
         window=args.window,
         threshold=args.threshold,
-        thresholds=dict(args.method_threshold),
+        thresholds=method_thresholds,
         seed=args.seed,
         epsilon=args.epsilon,
         max_z=args.max_z,
     )
+
+    explicit_methods = [
+        method for method in METHOD_NAMES if method in method_thresholds
+    ]
+    result["config"].update(
+        {
+            "execution_mode": "formal" if args.formal else "exploratory",
+            "formal": bool(args.formal),
+            "frozen_from_development": bool(args.formal),
+            "frozen_config_match_verified": bool(args.formal),
+            "explicit_method_thresholds": explicit_methods,
+            "fallback_threshold_methods": [
+                method for method in METHOD_NAMES if method not in method_thresholds
+            ],
+            "development_calibration_provenance": development_calibration,
+        }
+    )
+    if args.formal:
+        result["config"]["threshold_policy"] = "formal_frozen_per_method"
+    result["input_provenance"] = {
+        "snapshot_policy": "single_read_bytes_used_for_parse_and_sha256",
+        "health_jsonl": health_provenance,
+        "corruption_json": corruption_provenance,
+    }
 
     _write_metrics_json_atomic(args.output, result)
     return 0
