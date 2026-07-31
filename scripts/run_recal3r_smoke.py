@@ -512,6 +512,40 @@ def _assert_module_source(module: Any, expected_path: Path, label: str) -> str:
     return str(actual_path)
 
 
+def _binary_module_provenance(
+    module: Any,
+    *,
+    expected_directory: Path,
+    filename_prefix: str,
+    label: str,
+) -> dict[str, Any]:
+    """Freeze an ignored compiled module that is not covered by Git provenance."""
+
+    raw_path = getattr(module, "__file__", None)
+    if not isinstance(raw_path, str):
+        raise RuntimeError(f"{label} does not expose a binary source file")
+    try:
+        actual_path = Path(raw_path).resolve(strict=True)
+        expected_directory = expected_directory.resolve(strict=True)
+    except OSError as error:
+        raise RuntimeError(f"cannot resolve {label} binary provenance: {error}") from error
+    if (
+        actual_path.parent != expected_directory
+        or not actual_path.name.startswith(filename_prefix)
+        or actual_path.suffix != ".so"
+    ):
+        raise RuntimeError(
+            f"{label} loaded from {actual_path}, expected {filename_prefix}*.so "
+            f"inside {expected_directory}"
+        )
+    return {
+        "module": getattr(module, "__name__", type(module).__name__),
+        "path": str(actual_path),
+        "size_bytes": actual_path.stat().st_size,
+        "sha256": _sha256(actual_path),
+    }
+
+
 def _tensor_summary(value: Any, torch: Any) -> dict[str, Any] | None:
     if not isinstance(value, torch.Tensor):
         return None
@@ -850,6 +884,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     import dust3r.model as dust3r_model_module
     import dust3r.utils.camera as dust3r_camera_module
     import dust3r.utils.image as dust3r_image_module
+    import models.curope.curope2d as curope2d_module
 
     module_paths.update(
         {
@@ -873,7 +908,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.baseline_src / "dust3r" / "utils" / "image.py",
                 "dust3r.utils.image",
             ),
+            "models.curope.curope2d": _assert_module_source(
+                curope2d_module,
+                args.baseline_src / "croco" / "models" / "curope" / "curope2d.py",
+                "models.curope.curope2d",
+            ),
         }
+    )
+    curope_kernel_provenance = _binary_module_provenance(
+        curope2d_module._kernels,
+        expected_directory=args.baseline_src / "croco" / "models" / "curope",
+        filename_prefix="curope.",
+        label="cuRoPE CUDA extension",
     )
     inference_recurrent_lighter = dust3r_inference_module.inference_recurrent_lighter
     ARCroco3DStereo = dust3r_model_module.ARCroco3DStereo
@@ -1029,6 +1075,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "baseline_commit": args.baseline_commit,
         "baseline_tracked_worktree_clean": True,
         "module_paths": module_paths,
+        "curope_kernel": curope_kernel_provenance,
         "runner": runner_provenance,
         "checkpoint": str(args.checkpoint),
         "checkpoint_sha256": args.checkpoint_sha256,
