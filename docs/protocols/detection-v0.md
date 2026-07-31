@@ -71,6 +71,85 @@ The CLI's single fallback threshold exists for API convenience only. A formal
 run must pass and record four explicit per-method thresholds. AUROC does not use
 those thresholds.
 
+### Formal CLI gate
+
+Use `--formal` for any holdout result that may inform a Go/No-Go decision. This
+mode requires exactly one explicit `--method-threshold METHOD=VALUE` entry for
+each of `random`, `update_magnitude_only`, `reliability_only`, and `combined`.
+Missing entries and repeated method names are errors; the single `--threshold`
+fallback is therefore never used by a formal run.
+
+A formal run also requires `--dev-calibration-config PATH`. `PATH` must already
+exist and contain a strict development-calibration JSON object. It must declare
+`schema_version` as `stateguard3r.detection-calibration.v0`, set
+`dataset_split` to `development`, provide a non-empty string
+`development_run_id`, and contain `frozen_detection_config`. The frozen object
+must explicitly contain `window`, `seed`, `epsilon`, `max_z` (JSON `null` means
+uncapped), and `thresholds`. Its threshold map must contain all four and only the
+four required method names.
+
+The formal gate compares the parsed CLI values for every frozen field and every
+method threshold against this object. Numerical equality after JSON/CLI parsing
+is required. Duplicate JSON keys, a missing field, an unknown threshold method,
+or a mismatch is an error before the health ledger or corruption manifest is
+loaded. For example:
+
+```json
+{
+  "schema_version": "stateguard3r.detection-calibration.v0",
+  "development_run_id": "DEV-0001",
+  "dataset_split": "development",
+  "source_metrics": "outputs/dev-0001/metrics.json",
+  "selection_rule": "maximize F1, then minimize FPR",
+  "frozen_detection_config": {
+    "window": 15,
+    "seed": 0,
+    "epsilon": 0.000001,
+    "max_z": null,
+    "thresholds": {
+      "random": 0.5,
+      "update_magnitude_only": 3.0,
+      "reliability_only": -0.5,
+      "combined": 3.0
+    }
+  }
+}
+```
+
+The metrics output records `execution_mode`, `formal`,
+`frozen_from_development`, `frozen_config_match_verified`, all explicit and
+fallback threshold method names, and `development_calibration_provenance`. The
+provenance contains the resolved config path, SHA-256 of its exact bytes, and its
+full parsed JSON content. These fields make later substitution or omission
+visible; they do not independently prove that the supplied metadata is
+scientifically valid.
+
+```bash
+uv run python -m stateguard3r.detection \
+  health.jsonl corruption.json --output metrics.json \
+  --formal --dev-calibration-config development-calibration.json \
+  --method-threshold random=0.5 \
+  --method-threshold update_magnitude_only=3.0 \
+  --method-threshold reliability_only=-0.5 \
+  --method-threshold combined=3.0
+```
+
+Without `--formal`, the CLI remains an exploratory/smoke interface: omitted
+per-method values still inherit `--threshold`, and the Python API retains the
+same fallback behavior. Passing `--dev-calibration-config` without `--formal`
+is rejected so an exploratory result cannot accidentally advertise formal
+development provenance.
+
+### CLI input snapshots
+
+For both formal and exploratory CLI runs, the health JSONL and corruption JSON
+are each read into memory exactly once. Parsing and SHA-256 hashing use that same
+immutable byte snapshot; neither file is reopened for evaluation. This prevents
+a path change during launch from producing metrics from one file version and a
+hash from another. The result's `input_provenance` records the snapshot policy
+and, for each input, its resolved absolute path, raw-byte SHA-256, and byte size.
+The standalone Python loader functions keep their existing interfaces.
+
 ## Current signal boundary
 
 The upstream ReCal3R trace directly supplies uncertainty/reliability, attention
