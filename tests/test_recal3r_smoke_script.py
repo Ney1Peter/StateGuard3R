@@ -14,6 +14,7 @@ import scripts.run_recal3r_smoke as smoke_script
 from scripts.run_recal3r_smoke import (
     PINNED_RECAL3R_COMMIT,
     _assert_module_source,
+    _configure_official_recal3r_runtime,
     _input_frame_metadata,
     _input_manifest_metadata,
     _input_timestamps,
@@ -479,6 +480,24 @@ def test_loaded_model_interface_rejects_renamed_or_incompatible_head() -> None:
 
     with pytest.raises(RuntimeError, match="expected 'dpt'"):
         _validate_model_interface(model, "cut3r_512_dpt_4_64.pth")
+
+
+def test_official_recal3r_runtime_parameters_are_frozen_on_model_and_config() -> None:
+    model = SimpleNamespace(config=SimpleNamespace())
+
+    frozen = _configure_official_recal3r_runtime(model, beta_base=0.25)
+
+    assert frozen == {
+        "model_update_type": "recal3r",
+        "beta_base": 0.25,
+        "entropy_eps": 2e-14,
+        "entropy_head_reduce": "mean",
+        "uncertainty_clamp_max": 1.0,
+        "decay": 0.95,
+    }
+    for name, value in frozen.items():
+        assert getattr(model, name) == value
+        assert getattr(model.config, name) == value
 
 
 def test_checkpoint_loader_captures_and_restores_state_dict_audit(tmp_path) -> None:
