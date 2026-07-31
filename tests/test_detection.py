@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -433,6 +435,14 @@ def test_cli_reads_jsonl_and_writes_strict_metrics_json(tmp_path) -> None:
     assert exit_code == 0
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "detection-only-v0"
+    assert payload["config"]["execution_mode"] == "exploratory"
+    assert payload["config"]["formal"] is False
+    assert payload["config"]["frozen_from_development"] is False
+    assert payload["config"]["frozen_config_match_verified"] is False
+    assert payload["config"]["development_calibration_provenance"] is None
+    assert payload["input_provenance"]["snapshot_policy"] == (
+        "single_read_bytes_used_for_parse_and_sha256"
+    )
     assert payload["config"]["thresholds"]["random"] == pytest.approx(0.5)
     assert payload["labels"] == [0, 0, 0, 1, 0, 0, 0]
     assert set(payload["methods"]) == {
@@ -446,6 +456,472 @@ def test_cli_reads_jsonl_and_writes_strict_metrics_json(tmp_path) -> None:
         "reliability",
     ]
     assert payload["methods"]["combined"]["metrics"]["auroc"] == pytest.approx(1.0)
+
+
+def _development_calibration_config() -> dict:
+    return {
+        "schema_version": "stateguard3r.detection-calibration.v0",
+        "development_run_id": "DEV-0001",
+        "dataset_split": "development",
+        "selection_rule": "maximize F1, then minimize FPR",
+        "frozen_detection_config": {
+            "window": 15,
+            "seed": 0,
+            "epsilon": 1e-6,
+            "max_z": None,
+            "thresholds": {
+                "random": 0.5,
+                "update_magnitude_only": 3.0,
+                "reliability_only": -0.5,
+                "combined": 3.0,
+            },
+        },
+    }
+
+
+def _write_development_calibration(path, config: dict | None = None) -> None:
+    payload = _development_calibration_config() if config is None else config
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _formal_cli_arguments(
+    calibration_path,
+    *,
+    health_path="health.jsonl",
+    corruption_path="corruption.json",
+    output_path="metrics.json",
+    extra=(),
+) -> list[str]:
+    return [
+        str(health_path),
+        str(corruption_path),
+        "--output",
+        str(output_path),
+        "--formal",
+        "--dev-calibration-config",
+        str(calibration_path),
+        *extra,
+        "--method-threshold",
+        "random=0.5",
+        "--method-threshold",
+        "update_magnitude_only=3.0",
+        "--method-threshold",
+        "reliability_only=-0.5",
+        "--method-threshold",
+        "combined=3.0",
+    ]
+
+
+def test_formal_cli_requires_and_records_frozen_thresholds_and_provenance(
+    tmp_path,
+) -> None:
+    health_path = tmp_path / "health.jsonl"
+    corruption_path = tmp_path / "corruption.json"
+    calibration_path = tmp_path / "development-calibration.json"
+    output_path = tmp_path / "metrics.json"
+    health_path.write_text(
+        "".join(
+            json.dumps({"frame_id": index, "update_magnitude": float(index)})
+            + "\n"
+            for index in range(4)
+        ),
+        encoding="utf-8",
+    )
+    corruption_path.write_text(
+        json.dumps({"corruptions": [{"start": 2, "end": 2}]}),
+        encoding="utf-8",
+    )
+    calibration = _development_calibration_config()
+    calibration["frozen_detection_config"].update(
+        {"window": 3, "seed": 11, "epsilon": 0.25, "max_z": 5.0}
+    )
+    _write_development_calibration(calibration_path, calibration)
+
+    exit_code = main(
+        _formal_cli_arguments(
+            calibration_path,
+            health_path=health_path,
+            corruption_path=corruption_path,
+            output_path=output_path,
+            extra=(
+                "--window",
+                "3",
+                "--seed",
+                "11",
+                "--epsilon",
+                "0.25",
+                "--max-z",
+                "5.0",
+            ),
+        )
+    )
+
+    assert exit_code == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    config = payload["config"]
+    assert config["execution_mode"] == "formal"
+    assert config["formal"] is True
+    assert config["frozen_from_development"] is True
+    assert config["frozen_config_match_verified"] is True
+    assert config["threshold_policy"] == "formal_frozen_per_method"
+    assert config["window"] == 3
+    assert config["seed"] == 11
+    assert config["epsilon"] == pytest.approx(0.25)
+    assert config["max_z"] == pytest.approx(5.0)
+    assert config["explicit_method_thresholds"] == [
+        "random",
+        "update_magnitude_only",
+        "reliability_only",
+        "combined",
+    ]
+    assert config["fallback_threshold_methods"] == []
+    provenance = config["development_calibration_provenance"]
+    assert provenance["config_path"] == str(calibration_path.resolve())
+    assert provenance["config_sha256"] == hashlib.sha256(
+        calibration_path.read_bytes()
+    ).hexdigest()
+    assert provenance["config"]["development_run_id"] == "DEV-0001"
+    assert provenance["config"]["schema_version"] == (
+        "stateguard3r.detection-calibration.v0"
+    )
+    assert provenance["config"]["dataset_split"] == "development"
+    assert provenance["config"]["frozen_detection_config"] == (
+        calibration["frozen_detection_config"]
+    )
+    input_provenance = payload["input_provenance"]
+    assert input_provenance["snapshot_policy"] == (
+        "single_read_bytes_used_for_parse_and_sha256"
+    )
+    assert input_provenance["health_jsonl"] == {
+        "absolute_path": str(health_path.resolve()),
+        "sha256": hashlib.sha256(health_path.read_bytes()).hexdigest(),
+        "size_bytes": health_path.stat().st_size,
+    }
+    assert input_provenance["corruption_json"] == {
+        "absolute_path": str(corruption_path.resolve()),
+        "sha256": hashlib.sha256(corruption_path.read_bytes()).hexdigest(),
+        "size_bytes": corruption_path.stat().st_size,
+    }
+
+
+def test_formal_cli_parses_and_hashes_each_input_from_one_snapshot(
+    tmp_path, monkeypatch
+) -> None:
+    health_path = tmp_path / "health.jsonl"
+    corruption_path = tmp_path / "corruption.json"
+    calibration_path = tmp_path / "development-calibration.json"
+    output_path = tmp_path / "metrics.json"
+    health_before = b'{"frame_id": 0}\n{"frame_id": 1}\n'
+    health_after = b'{"frame_id": 8}\n{"frame_id": 9}\n{"frame_id": 10}\n'
+    corruption_before = b'{"corruptions": [{"start": 1, "end": 1}]}'
+    corruption_after = b'{"corruptions": [{"start": 0, "end": 0}]}'
+    health_path.write_bytes(health_before)
+    corruption_path.write_bytes(corruption_before)
+    _write_development_calibration(calibration_path)
+
+    original_read_bytes = Path.read_bytes
+    read_counts = {health_path: 0, corruption_path: 0}
+
+    def read_then_modify(path: Path) -> bytes:
+        raw = original_read_bytes(path)
+        if path == health_path:
+            read_counts[path] += 1
+            path.write_bytes(health_after)
+        elif path == corruption_path:
+            read_counts[path] += 1
+            path.write_bytes(corruption_after)
+        return raw
+
+    monkeypatch.setattr(Path, "read_bytes", read_then_modify)
+
+    assert (
+        main(
+            _formal_cli_arguments(
+                calibration_path,
+                health_path=health_path,
+                corruption_path=corruption_path,
+                output_path=output_path,
+            )
+        )
+        == 0
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["frame_count"] == 2
+    assert payload["frame_ids"] == [0, 1]
+    assert payload["labels"] == [0, 1]
+    assert read_counts == {health_path: 1, corruption_path: 1}
+    assert payload["input_provenance"]["health_jsonl"]["sha256"] == (
+        hashlib.sha256(health_before).hexdigest()
+    )
+    assert payload["input_provenance"]["corruption_json"]["sha256"] == (
+        hashlib.sha256(corruption_before).hexdigest()
+    )
+    assert original_read_bytes(health_path) == health_after
+    assert original_read_bytes(corruption_path) == corruption_after
+
+
+def test_formal_cli_rejects_a_missing_method_threshold(tmp_path, capsys) -> None:
+    calibration_path = tmp_path / "development-calibration.json"
+    _write_development_calibration(calibration_path)
+
+    with pytest.raises(SystemExit, match="2"):
+        main(
+            [
+                "health.jsonl",
+                "corruption.json",
+                "--output",
+                "metrics.json",
+                "--formal",
+                "--dev-calibration-config",
+                str(calibration_path),
+                "--method-threshold",
+                "random=0.5",
+                "--method-threshold",
+                "update_magnitude_only=3.0",
+                "--method-threshold",
+                "combined=3.0",
+            ]
+        )
+
+    assert "missing: reliability_only" in capsys.readouterr().err
+
+
+def test_formal_cli_rejects_duplicate_method_thresholds(tmp_path, capsys) -> None:
+    calibration_path = tmp_path / "development-calibration.json"
+    _write_development_calibration(calibration_path)
+
+    with pytest.raises(SystemExit, match="2"):
+        main(
+            [
+                "health.jsonl",
+                "corruption.json",
+                "--output",
+                "metrics.json",
+                "--formal",
+                "--dev-calibration-config",
+                str(calibration_path),
+                "--method-threshold",
+                "random=0.5",
+                "--method-threshold",
+                "random=0.6",
+                "--method-threshold",
+                "update_magnitude_only=3.0",
+                "--method-threshold",
+                "reliability_only=-0.5",
+                "--method-threshold",
+                "combined=3.0",
+            ]
+        )
+
+    assert "duplicate --method-threshold method(s): random" in capsys.readouterr().err
+
+
+def test_formal_cli_requires_development_calibration_config(capsys) -> None:
+    with pytest.raises(SystemExit, match="2"):
+        main(
+            [
+                "health.jsonl",
+                "corruption.json",
+                "--output",
+                "metrics.json",
+                "--formal",
+                "--method-threshold",
+                "random=0.5",
+                "--method-threshold",
+                "update_magnitude_only=3.0",
+                "--method-threshold",
+                "reliability_only=-0.5",
+                "--method-threshold",
+                "combined=3.0",
+            ]
+        )
+
+    assert "--formal requires --dev-calibration-config" in capsys.readouterr().err
+
+
+def test_formal_cli_rejects_calibration_without_development_run_id(
+    tmp_path, capsys
+) -> None:
+    calibration_path = tmp_path / "development-calibration.json"
+    calibration = _development_calibration_config()
+    del calibration["development_run_id"]
+    _write_development_calibration(calibration_path, calibration)
+
+    with pytest.raises(SystemExit, match="2"):
+        main(
+            [
+                "health.jsonl",
+                "corruption.json",
+                "--output",
+                "metrics.json",
+                "--formal",
+                "--dev-calibration-config",
+                str(calibration_path),
+                "--method-threshold",
+                "random=0.5",
+                "--method-threshold",
+                "update_magnitude_only=3.0",
+                "--method-threshold",
+                "reliability_only=-0.5",
+                "--method-threshold",
+                "combined=3.0",
+            ]
+        )
+
+    assert "non-empty development_run_id string" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("field", "frozen_value"),
+    [
+        ("window", 16),
+        ("seed", 1),
+        ("epsilon", 2e-6),
+        ("max_z", 5.0),
+    ],
+)
+def test_formal_cli_rejects_each_runtime_config_mismatch(
+    tmp_path, capsys, field, frozen_value
+) -> None:
+    calibration_path = tmp_path / "development-calibration.json"
+    calibration = _development_calibration_config()
+    calibration["frozen_detection_config"][field] = frozen_value
+    _write_development_calibration(calibration_path, calibration)
+
+    with pytest.raises(SystemExit, match="2"):
+        main(_formal_cli_arguments(calibration_path))
+
+    error = capsys.readouterr().err
+    assert f"formal CLI {field}=" in error
+    assert f"frozen_detection_config.{field}=" in error
+
+
+def test_formal_cli_rejects_threshold_mismatch(tmp_path, capsys) -> None:
+    calibration_path = tmp_path / "development-calibration.json"
+    calibration = _development_calibration_config()
+    calibration["frozen_detection_config"]["thresholds"]["combined"] = 4.0
+    _write_development_calibration(calibration_path, calibration)
+
+    with pytest.raises(SystemExit, match="2"):
+        main(_formal_cli_arguments(calibration_path))
+
+    error = capsys.readouterr().err
+    assert "formal CLI threshold for combined=3.0" in error
+    assert "frozen_detection_config.thresholds['combined']=4.0" in error
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ["window", "seed", "epsilon", "max_z", "thresholds"],
+)
+def test_formal_cli_rejects_each_missing_frozen_config_field(
+    tmp_path, capsys, missing_field
+) -> None:
+    calibration_path = tmp_path / "development-calibration.json"
+    calibration = _development_calibration_config()
+    del calibration["frozen_detection_config"][missing_field]
+    _write_development_calibration(calibration_path, calibration)
+
+    with pytest.raises(SystemExit, match="2"):
+        main(_formal_cli_arguments(calibration_path))
+
+    assert (
+        f"frozen_detection_config is missing required field(s): {missing_field}"
+        in capsys.readouterr().err
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_error"),
+    [
+        ("missing", "missing method(s): reliability_only"),
+        ("unknown", "unknown method(s): oracle"),
+    ],
+)
+def test_formal_cli_rejects_inexact_frozen_threshold_methods(
+    tmp_path, capsys, mutation, expected_error
+) -> None:
+    calibration_path = tmp_path / "development-calibration.json"
+    calibration = _development_calibration_config()
+    thresholds = calibration["frozen_detection_config"]["thresholds"]
+    if mutation == "missing":
+        del thresholds["reliability_only"]
+    else:
+        thresholds["oracle"] = 1.0
+    _write_development_calibration(calibration_path, calibration)
+
+    with pytest.raises(SystemExit, match="2"):
+        main(_formal_cli_arguments(calibration_path))
+
+    assert expected_error in capsys.readouterr().err
+
+
+def test_formal_cli_rejects_duplicate_calibration_json_keys(
+    tmp_path, capsys
+) -> None:
+    calibration_path = tmp_path / "development-calibration.json"
+    serialized = json.dumps(_development_calibration_config(), sort_keys=True)
+    serialized = serialized.replace(
+        '"random": 0.5', '"random": 0.4, "random": 0.5', 1
+    )
+    calibration_path.write_text(serialized, encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="2"):
+        main(_formal_cli_arguments(calibration_path))
+
+    assert "duplicate JSON object key 'random'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value", "expected_error"),
+    [
+        (
+            "schema_version",
+            "stateguard3r.detection-calibration.v1",
+            "schema_version must be 'stateguard3r.detection-calibration.v0'",
+        ),
+        (
+            "dataset_split",
+            "holdout",
+            "dataset_split must be 'development'",
+        ),
+    ],
+)
+def test_formal_cli_requires_schema_and_development_split(
+    tmp_path, capsys, field, invalid_value, expected_error
+) -> None:
+    calibration_path = tmp_path / "development-calibration.json"
+    calibration = _development_calibration_config()
+    calibration[field] = invalid_value
+    _write_development_calibration(calibration_path, calibration)
+
+    with pytest.raises(SystemExit, match="2"):
+        main(_formal_cli_arguments(calibration_path))
+
+    assert expected_error in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "expected_error"),
+    [
+        ("schema_version", "schema_version must be"),
+        ("dataset_split", "dataset_split must be 'development'"),
+        ("frozen_detection_config", "must contain a frozen_detection_config"),
+    ],
+)
+def test_formal_cli_rejects_missing_calibration_contract_fields(
+    tmp_path, capsys, missing_field, expected_error
+) -> None:
+    calibration_path = tmp_path / "development-calibration.json"
+    calibration = _development_calibration_config()
+    del calibration[missing_field]
+    _write_development_calibration(calibration_path, calibration)
+
+    with pytest.raises(SystemExit, match="2"):
+        main(_formal_cli_arguments(calibration_path))
+
+    assert expected_error in capsys.readouterr().err
 
 
 def test_atomic_metrics_write_preserves_existing_output_on_failure(tmp_path) -> None:
