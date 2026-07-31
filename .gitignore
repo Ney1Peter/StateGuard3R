@@ -1,0 +1,28 @@
+# Python
+/.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local caches and temporary files
+/.cache/
+/tmp/
+
+# Experiment resources and outputs
+/data/
+/checkpoints/
+/outputs/
+/logs/
+*.pth
+*.pt
+*.ckpt
+*.tgz
+*.tar.gz
+*.avi
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
