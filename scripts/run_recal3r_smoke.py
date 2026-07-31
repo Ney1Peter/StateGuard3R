@@ -601,10 +601,10 @@ def _load_model_with_state_dict_audit(
 
     module_class = torch.nn.Module
     original_load_state_dict = module_class.load_state_dict
-    if model_class.load_state_dict is not original_load_state_dict:
-        raise RuntimeError(
-            "ARCroco3DStereo unexpectedly overrides torch.nn.Module.load_state_dict"
-        )
+    # The pinned ARCroco3DStereo intentionally overrides load_state_dict to
+    # normalize legacy keys, then delegates to this base implementation. Audit
+    # that delegated compatibility result; a non-delegating override is still
+    # rejected below because it produces zero captured calls.
     calls: list[dict[str, Any]] = []
 
     def audited_load_state_dict(
