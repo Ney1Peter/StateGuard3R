@@ -14,6 +14,7 @@ import scripts.run_recal3r_smoke as smoke_script
 from scripts.run_recal3r_smoke import (
     PINNED_RECAL3R_COMMIT,
     _assert_module_source,
+    _binary_module_provenance,
     _configure_official_recal3r_runtime,
     _input_frame_metadata,
     _input_manifest_metadata,
@@ -480,6 +481,43 @@ def test_loaded_model_interface_rejects_renamed_or_incompatible_head() -> None:
 
     with pytest.raises(RuntimeError, match="expected 'dpt'"):
         _validate_model_interface(model, "cut3r_512_dpt_4_64.pth")
+
+
+def test_binary_module_provenance_freezes_expected_ignored_extension(
+    tmp_path: Path,
+) -> None:
+    extension = tmp_path / "curope.cpython-311-x86_64-linux-gnu.so"
+    extension.write_bytes(b"compiled-kernel")
+    module = SimpleNamespace(__name__="models.curope.curope", __file__=str(extension))
+
+    assert _binary_module_provenance(
+        module,
+        expected_directory=tmp_path,
+        filename_prefix="curope.",
+        label="cuRoPE CUDA extension",
+    ) == {
+        "module": "models.curope.curope",
+        "path": str(extension),
+        "size_bytes": len(b"compiled-kernel"),
+        "sha256": hashlib.sha256(b"compiled-kernel").hexdigest(),
+    }
+
+
+def test_binary_module_provenance_rejects_wrong_directory(tmp_path: Path) -> None:
+    expected = tmp_path / "expected"
+    actual = tmp_path / "actual"
+    expected.mkdir()
+    actual.mkdir()
+    extension = actual / "curope.test.so"
+    extension.write_bytes(b"compiled-kernel")
+
+    with pytest.raises(RuntimeError, match="expected curope"):
+        _binary_module_provenance(
+            SimpleNamespace(__file__=str(extension)),
+            expected_directory=expected,
+            filename_prefix="curope.",
+            label="cuRoPE CUDA extension",
+        )
 
 
 def test_official_recal3r_runtime_parameters_are_frozen_on_model_and_config() -> None:
