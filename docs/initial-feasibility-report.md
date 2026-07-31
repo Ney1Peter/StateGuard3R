@@ -1,7 +1,7 @@
 # StateGuard3R 初步可行性报告
 
 - 日期：2026-08-01
-- 证据截止时间：2026-08-01 02:17 CST
+- 证据截止时间：2026-08-01 02:29 CST
 - StateGuard3R 证据快照：`08e59d0f43c7ec0af7e48d487215b29c000ec39a`
 - ReCal3R 固定上游：`466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
 - 当前结论：**HOLD — evidence pending**
@@ -139,10 +139,13 @@ risk 绝对幅值完全不具备现实校准意义。
 官方 final checkpoint `cut3r_512_dpt_4_64.pth` 仍不存在。官方 README 指向的
 Google Drive file ID `1Asz-ZB3FfpzZYwunhQvNPZEUA8XUNAYD` 在多次有限时连接中于
 DNS/HTTPS 建连阶段超时；02:17 CST 的最新一次限时 HEAD 检查仍为 DNS timeout、HTTP
-`000` 和零响应体。本地没有真实文件、`.part` 或 `.partial`，没有使用第三方镜像。
-官方也未发布可信 checksum，所以未来首次取得文件后计算的 SHA-256 只能证明本项目内
-的一致性，不能单独认证来源。224 Linear fallback 也不存在；即使取得，它也只能做
-`--size 224` 接口 smoke，不能替代 512 final baseline 或正式指标。
+`000` 和零响应体。随后对两个官方 GitHub 仓库的 issue/release 元数据检查没有发现权重
+release 或已确认的替代入口；CUT3R 仓库 contributor 链接的 Hugging Face 仓库只明确
+用于处理后数据，不能据此推断存在模型。Project2 范围及扩展至 `/data/wangzheng` 的
+本地只读查重均没有找到真实文件、`.part` 或 `.partial`。没有使用第三方镜像。官方未
+发布可信 checksum，所以未来首次取得文件后计算的 SHA-256 只能证明本项目内的一致性，
+不能单独认证来源。224 Linear fallback 也不存在；即使取得，它也只能做 `--size 224` 接口
+smoke，不能替代 512 final baseline 或正式指标。
 
 最近一次已登记 GPU 检查（2026-08-01 02:17 CST）显示 8 张 L20 均有既有 compute
 process，显存占用约为 `21038, 30854, 21175, 18909, 24651, 26139, 25247, 41495 MiB`，

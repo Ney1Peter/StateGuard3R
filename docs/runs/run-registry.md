@@ -126,6 +126,27 @@ so no card met the empty-card rule. A task-path process sweep and listening-port
 check found no long-lived StateGuard3R/ReCal3R process or service owned by this
 work. No existing process was changed.
 
+### SETUP-0008: Exhaust official checkpoint metadata and local reuse paths
+
+- Time: 2026-08-01 02:27–02:29 CST
+- Result: no confirmed alternate official checkpoint path and no local copy
+- Download or partial file created: no
+
+Read-only GitHub API checks found no ReCal3R issue mentioning the checkpoint
+and no release assets in either `Powertony102/ReCal3R` or `CUT3R/CUT3R`. CUT3R
+issue 4 contains an unanswered request to host models on Hugging Face. In issue
+18, a repository contributor links a Hugging Face dataset repository for
+processed datasets, not model weights. Bounded HEAD probes for the two expected
+checkpoint filenames under that dataset repository could not connect; they do
+not establish that such files exist. No unverified URL was promoted to an
+official checkpoint source.
+
+A broader read-only filename search across `/data/wangzheng`, as permitted by
+the server rules for reuse checks, found neither supported checkpoint under an
+alternate local path. This exhausts the currently discoverable safe sources;
+future progress requires the official Google endpoint to recover or a
+user-provided, source-traceable file.
+
 ## Development pipeline records
 
 ### DEV-SYNTH-0001: Original synthetic CLI smoke
