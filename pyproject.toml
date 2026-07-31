@@ -20,6 +20,7 @@ dev = [
 [project.scripts]
 stateguard3r-corrupt = "stateguard3r.corruption:main"
 stateguard3r-detect = "stateguard3r.detection:main"
+stateguard3r-timeline = "stateguard3r.timeline:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/stateguard3r"]
@@ -27,3 +28,4 @@ packages = ["src/stateguard3r"]
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
+pythonpath = ["."]
