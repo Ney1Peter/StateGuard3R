@@ -1,8 +1,8 @@
 # StateGuard3R 初步可行性报告
 
 - 日期：2026-08-01
-- 证据截止时间：2026-08-01 17:50 CST
-- StateGuard3R 证据快照：`5231580b15750cfaa6ce374ce7b67b29f65fa574`
+- 证据截止时间：2026-08-01 18:20 CST
+- StateGuard3R 证据快照：`4e97a06cc6e6b70f5c92aaa76516683c9cc0a642`
 - ReCal3R 固定上游：`466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
 - 当前结论：**HOLD — evidence pending**
 
@@ -210,6 +210,11 @@ checkpoint 哈希上成功完成。实测证据包括：
 因此仍未获得 4–8 帧 clean state 行为、TUM clean baseline、真实三类 corruption 响应、
 独立 development/holdout、正式 AUROC/F1/FPR/delay，以及支持 quarantine/rollback 的证据。
 
+随后 `GATE0-STATE4-0001` 用 Chateau1、Chateau2、宽幅 `arch.jpg`、Chateau1 四个只读
+引用完成机械 state smoke：恰好 3 次 update、trace `[1,2,3]`、四帧对齐且全部数值
+finite；推理段 1.348210 秒，峰值 allocated 显存 6,367.173 MiB。它证明 recurrent
+计数、trace、混合宽高比和输出对齐，但重复资产不构成真实连续 clean 序列证据。
+
 ### 3.2 Gate 状态
 
 | Gate | 状态 | 证据与约束 |
@@ -220,16 +225,16 @@ checkpoint 哈希上成功完成。实测证据包括：
 | 官方 512 checkpoint | **PASS（来源边界有限）** | 用户声明取自官方入口；大小/首次 SHA 已冻结并只读，官方无 checksum |
 | Gate 0 单卡资源 | **PASS（当次快照）** | GPU 4 连续两次空闲并显式绑定；运行峰值 6,362.670 MiB，退出后释放 |
 | Gate 0：Chateau 两图真实 ReCal3R smoke | **PASS** | 0002 完成真实 CUDA forward、一次 update、finite 轻量输出与完整 provenance |
-| 4–8 帧 clean state smoke | **NEXT / UNLOCKED** | 先用现有官方资产做最小连续状态/trace 对齐检查，不宣称真实连续场景 |
-| Gate 1：7.69 MiB TUM `fr1_xyz` AVI | **LOCKED pending 4–8 frames** | 前述 smoke 通过后才允许；AVI 不能用于 ATE/RPE |
+| 4 帧机械 state smoke | **PASS（接口层）** | 3 次 update/trace 和四帧有限输出通过；重复资产，非真实连续场景 |
+| Gate 1：7.69 MiB TUM `fr1_xyz` AVI | **NEXT / UNLOCKED** | 先约 10 帧、再约 30 帧；AVI 不能用于 ATE/RPE |
 | Gate 2：328.07 MiB `fr1_desk.tgz` | **LOCKED；当前禁止下载** | 只有 Gate 0、4–8 帧和 Gate 1 均通过后才允许 |
 | 真实 Health Ledger 与三类 corruption | **LOCKED** | 依赖真实连续 forward；不得用 synthetic ledger 顶替 |
 | 正式 development/holdout detection | **LOCKED** | 尚无真实日志与冻结开发集配置，不能检验 AUROC > 0.75 等 Go 条件 |
 | Phase 5 科研决策 | **HOLD — evidence pending** | 证据不足，既非 Go 也非方法 No-Go |
 | Quarantine/rollback | **LOCKED；当前禁止进入** | 仅在真实 formal detection 满足预设 Go gate 后才可开始 |
 
-checkpoint 与当次 GPU 门禁已经解除，Gate 0 已通过。当前只能推进 4–8 帧 clean state
-smoke；不得把两图结果升级为连续序列、detection 或科研 Go。
+checkpoint、GPU、两图 Gate 0 和四帧机械 state gate 已通过。当前只能推进 7.69 MiB
+TUM AVI 的约 10 帧后约 30 帧 smoke；不得把机械结果升级为真实连续序列、detection 或科研 Go。
 
 ### 3.3 严格解阻顺序
 
@@ -240,9 +245,9 @@ smoke；不得把两图结果升级为连续序列、detection 或科研 Go。
 3. **已完成：**在固定且可审计的 StateGuard3R/ReCal3R commit 上完成两张 Chateau 图片
    的 512 smoke，验证了 checkpoint/head、finite 输出、`N-1=1` update、前后哈希、
    runtime/peak memory、进程退出和显存释放。
-4. **下一步：**扩到 4 帧（通过后最多 8 帧）的无下载 state smoke，验证连续状态、trace
-   对齐、pose/residual 定义及输出数量；它是机械接口检查，不是真实连续场景证据。
-5. 以上通过后，才允许唯一的 Gate 1 数据下载：7.69 MiB `fr1_xyz` RGB AVI，并先限制
+4. **已完成：**扩到 4 帧无下载 state smoke，验证了 update/trace、混合宽高比及输出
+   数量；它是机械接口检查，不是真实连续场景证据。
+5. **下一步：**允许唯一的 Gate 1 数据下载：7.69 MiB `fr1_xyz` RGB AVI，并先限制
    为约 10 帧、再至约 30 帧。它仅用于连续推理 smoke，不报告 ATE/RPE。
 6. Gate 1 通过后，才允许唯一完整包 `fr1_desk.tgz`（328.07 MiB）；先做 8 帧 I/O，
    再做 30–50 个连续帧，最后才考虑完整 clean baseline。原始数据保持只读，不运行会
@@ -256,6 +261,6 @@ smoke；不得把两图结果升级为连续序列、detection 或科研 Go。
    quarantine/rollback。
 
 综上，当前最积极且严谨的结论是：软件与可复现管线已具备继续实验的基础，真实
-ReCal3R 两图 Gate 0 已通过，但连续序列、corruption detection 和 holdout 核心证据仍为
-零。**决定维持 HOLD — evidence pending；先执行 4–8 帧 state smoke，未通过前不下载
-TUM，quarantine/rollback 继续禁止。**
+ReCal3R 两图 Gate 0 和四帧机械 state gate 已通过，但真实连续序列、corruption detection
+和 holdout 核心证据仍为零。**决定维持 HOLD — evidence pending；下一步只下载 7.69 MiB
+TUM AVI 并先跑约 10 帧，328 MiB TGZ 与 quarantine/rollback 继续禁止。**

@@ -363,8 +363,11 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
       `DPTPts3dPose`、cuRoPE、两图 CUDA forward 和恰好一次 calibrated update 均通过
       守卫；所有轻量输出 finite。推理段 1.052124 秒、1.900916 FPS，峰值 allocated
       显存 6,362.670 MiB，退出后 GPU 4 恢复为空闲状态。
-- [ ] 4–8 帧 clean state smoke、真实 corruption Health Ledger、formal holdout 指标和
-      科研 Go/No-Go 尚无证据。当前只解锁下一层 4–8 帧 smoke；TUM Gate 1 必须等待
-      该层通过，quarantine 和 rollback 继续禁入。
+- [x] `GATE0-STATE4-0001` 已用现有官方资产的四个只读引用通过机械 state smoke：
+      `N-1=3` updates、trace `[1,2,3]`、四帧有限输出和混合宽高比均通过；峰值 allocated
+      显存 6,367.173 MiB。该序列不是连续真实场景，只解除 7.69 MiB TUM AVI Gate 1。
+- [ ] 真实连续 clean/corruption Health Ledger、formal holdout 指标和科研 Go/No-Go
+      尚无证据。当前允许 Gate 1 的约 10 帧后约 30 帧 smoke；328 MiB TGZ、quarantine
+      和 rollback 继续禁入。
 
 状态更新规则：每完成一个阶段，立即更新本节、运行登记和验证结果；只有满足上一阶段门槛才推进下一阶段。

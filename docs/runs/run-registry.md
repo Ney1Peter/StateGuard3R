@@ -516,6 +516,54 @@ GPU 4 returned to 4 MiB used, 45,586 MiB free, 0% utilization, P8, with no
 compute PID. This PASS unlocks only the next 4–8-frame smoke, not detection or
 quarantine.
 
+### GATE0-STATE4-0001: Four-frame mechanical state smoke
+
+- Status: **succeeded — four-frame state/trace gate PASS**
+- Start/end: 2026-08-01 18:19:38–18:20:05 CST
+- StateGuard3R commit: `4e97a06cc6e6b70f5c92aaa76516683c9cc0a642`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
+- Main PID: `4079642`; exit code: `0`; GPU: physical index 4
+- Inputs, in order: Chateau1, Chateau2, `arch.jpg`, Chateau1; files were
+  referenced read-only and not copied
+- `arch.jpg` SHA-256: `05fbf12896a79819a3864a800b174896bd3b6fa29b4f4f580d06725ff7c30dc7`
+- Log: `logs/gate0-state4-0001.log`, 8,325 bytes, SHA-256
+  `837de34cede7f7ad15e8eec29506d67d3acd84ebe51e7c49ad5de764b2f49830`
+- Output: `outputs/gate0-state4-0001`
+
+The exact argv is embedded in `run.json`. It matched the successful 0002
+command and environment, added the third and fourth `--image` arguments above,
+and used unique `gate0-state4-0001` output/log paths. Two immediate preflight
+snapshots again showed GPU 4 at 45,586 MiB free, 0% utilization, P8, and no
+compute PID.
+
+All four frames completed with exactly `N-1=3` calibrated updates and trace
+steps `[1,2,3]`. Health, trajectory, and prediction summaries each contained
+four aligned frames, and every recorded numeric value was finite. The official
+loader produced `512x384` model inputs for the Chateau images and `512x176`
+for the wide `arch.jpg`, exercising mixed aspect ratios. Inference-scope
+runtime was 1.348210 seconds, 2.966896 FPS, and peak allocated memory was
+6,367.173 MiB.
+
+Output hashes:
+
+```text
+checkpoint-load-audit.json  3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d
+health.jsonl                60c979e2898242b45f7e43dbdd44e2cb446b80a5868a8c0723b91e1866a00b23
+predictions-summary.json    55dccdc74af7375aa2b1af2c2ce5c3f5cc99c905ef2f1d78284cba67d2f687a0
+run.json                    9326a04653283473470d3fb3545c50c8fd663a0035cb1eda925af457aa0c5a5a
+trajectory.json             57847393c73d90f47bed68cbccaa14002196f37bea68b6f1d9c5c5547855ce3b
+```
+
+Checkpoint and input hashes remained unchanged, and GPU 4 returned to 4 MiB
+used with no compute PID. Because this sequence repeats assets and is not a
+continuous capture, it proves recurrent count/trace/output alignment only; it
+is not a clean-scene, accuracy, drift, or detection result. It unlocks only the
+small TUM AVI Gate 1. Candidate/final beta, `update_magnitude`, and
+local-memory delta remained `null`; only `global_state_delta` was measured.
+`run.json.log_path` is also `null`, so the external log path and hash above are
+the binding log record.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
