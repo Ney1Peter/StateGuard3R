@@ -396,17 +396,64 @@ upgrade the synthetic detection metrics into research results.
 
 ### GATE0-REAL-0001: Official ReCal3R two-image smoke
 
-- Status: blocked before launch
-- Intended inputs: the two Chateau images above
-- Intended checkpoint: official 512 DPT 4–64
-- Blocking conditions: checkpoint unavailable and no completely idle GPU
-- CUDA process/PID/output: none
+- Status: **failed before model-to-CUDA/forward due to a runner interface
+  false-negative**; retained and not overwritten
+- Start/end evidence: 2026-08-01 17:28:59–17:29:25 CST
+- StateGuard3R commit: `1fb53690254221daabdec97c3b32d1a1783b04cc`
+- Runner SHA-256: `03b535ce9ceb18de75eb3c39795746eea4047617dd315d0f416a4724b1492622`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Main PID: `3754415`; observed process exit code: `1`
+- GPU binding: `CUDA_VISIBLE_DEVICES=4`; preflight 45,586 MiB free, no compute
+  PID, 0% utilization, P8
+- Checkpoint: 3,173,761,006-byte official 512 DPT 4–64, SHA-256
+  `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`
+- Inputs: Chateau1 SHA-256 `71ffb8c7d77e5ced0bb3dcd2cb0db84d0e98e6ff5ffd2d02696a7156e5284857`;
+  Chateau2 SHA-256 `c3a0be9e19f6b89491d692c71e3f2317c2288a898a990561d48b7667218b47c8`
+- Log: `logs/gate0-real-0001.log`, 1,554 bytes, SHA-256
+  `6a337604a3ab6f1070eb103f74f79fd44cc719a798ab05d57ddf0d5af4491dc3`
+- Output: `outputs/gate0-real-0001/checkpoint-load-audit.json`, 106 bytes,
+  SHA-256 `3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d`
 
-The CPU-only official image loader did successfully load both source images at
-shape `1x3x384x512` with value range `[-1, 1]`, without changing their hashes.
-It used the ReCal3R `.venv`, project-local `TMPDIR`, and an empty
-`CUDA_VISIBLE_DEVICES`; no CUDA context was requested. This validates
-preprocessing only, not checkpoint loading or model forward.
+Full model command after the separately recorded Git/checkpoint/GPU preflight:
+
+```bash
+CUDA_VISIBLE_DEVICES=4 PYTHONUNBUFFERED=1 \
+TMPDIR=/data/wangzheng/Project2/StateGuard3R/tmp \
+UV_CACHE_DIR=/data/wangzheng/Project2/.cache/uv \
+HF_HOME=/data/wangzheng/Project2/.cache/huggingface \
+TORCH_HOME=/data/wangzheng/Project2/.cache/torch \
+/data/wangzheng/Project2/baselines/ReCal3R/.venv/bin/python \
+  /data/wangzheng/Project2/StateGuard3R/scripts/run_recal3r_smoke.py \
+  --baseline-root /data/wangzheng/Project2/baselines/ReCal3R \
+  --checkpoint /data/wangzheng/Project2/baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth \
+  --checkpoint-sha256 45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103 \
+  --image /data/wangzheng/Project2/baselines/ReCal3R/src/croco/assets/Chateau1.png \
+  --image /data/wangzheng/Project2/baselines/ReCal3R/src/croco/assets/Chateau2.png \
+  --output-dir /data/wangzheng/Project2/StateGuard3R/outputs/gate0-real-0001 \
+  --device cuda --size 512 --seed 0 --beta-base 0.1 \
+  2>&1 | tee /data/wangzheng/Project2/StateGuard3R/logs/gate0-real-0001.log
+```
+
+Static preflight and preprocessing passed. The official loader
+deserialized the checkpoint, instantiated `ARCroco3DStereo` with
+`head_type='dpt'` and `output_mode='pts3d+pose'`, and reported
+`<All keys matched successfully>`. The load audit confirms `strict=false` with
+empty missing and unexpected key lists.
+
+The runner then incorrectly read the three outer architecture fields from
+`model.config`, which the pinned CroCo parent constructor replaces with a
+narrower `CrocoConfig`. It therefore observed `head_type=None` and stopped at
+the interface guard. `model.to(cuda)`, cuRoPE execution, forward, the expected
+single calibrated update, runtime/peak-memory measurement, health output,
+trajectory, and `run.json` did not occur. This failure is not checkpoint
+incompatibility and is not a research result.
+
+Commits `5a8e609` and `ee5768c` correct the guard to validate the effective
+model/downstream fields and add pinned-like conflict/absence/pose-structure
+tests. GPU 4 returned to 4 MiB used, 45,586 MiB free, 0% utilization, P8, with
+no compute PID. Checkpoint and input hashes remained unchanged. The next
+attempt must use new run ID `GATE0-REAL-0002`; TUM remains locked until it
+passes.
 
 ## Experiment record template
 

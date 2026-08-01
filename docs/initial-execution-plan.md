@@ -330,7 +330,7 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
       Health Ledger、四方法 detection、formal freeze gate 和 SVG timeline。
 - [x] 已实现外部 ReCal3R smoke runner；会冻结两仓库 provenance、校验 checkpoint
       SHA/大小/名称/尺寸/head/weight keys，并导出 pose、pointmap residual、trace 与
-      trajectory。当前全套测试为 174 passed。
+      trajectory。当前全套测试为 179 passed。
 - [x] 已完成 Gate 0 runner readiness 加固：允许并审计 pinned model 的
       `load_state_dict` 委托 override（`8f6360c` / `e2d5f86`）；按来源文件及 SHA
       冻结官方 relpose 赋值语义，并为本 smoke 显式选择 `recal3r` / `beta_base=0.1`
@@ -352,7 +352,13 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] Gate 0 GPU 门禁已恢复：GPU 4/3 连续快照均约有 45.6 GiB 空闲、无 compute PID；
       用户另行允许使用显存充足的非完全空闲卡，但不得停止或干扰既有进程。实际启动前
       仍须紧邻复查并显式绑定单卡。
-- [ ] 真实两图 checkpoint load、CUDA kernel、forward 和一次 calibrated update 尚未执行。
+- [x] 官方 512 checkpoint 已在 0001 中成功反序列化，`strict=false` 的 missing / unexpected
+      keys 均为空；这只通过加载子门槛，不代表模型 forward。
+- [ ] 真实两图的 model-to-CUDA、cuRoPE kernel、forward 和一次 calibrated update 尚未执行。
+- [x] `GATE0-REAL-0001` 已保留为 pre-forward 失败证据：checkpoint 反序列化与全部
+      state-dict keys 匹配，但 runner 错从被基类替换的 `model.config` 读取 head 契约，
+      在 `model.to(cuda)` 前误拒绝。`5a8e609` / `ee5768c` 已按 pinned 真实 model 与
+      downstream 字段修复并补齐回归测试；重试必须使用全新 0002 路径。
 - [ ] 真实 clean/corruption Health Ledger、formal holdout 指标和科研 Go/No-Go
       尚无证据，因此 TUM 下载、quarantine 和 rollback 继续禁入。
 
