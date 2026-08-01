@@ -1079,6 +1079,95 @@ quarantine, or a research Go. It unlocks only preparation and separate
 exploratory smokes for the three planned corruptions on the same frozen source;
 the 50-frame and formal gates remain locked.
 
+### GATE2-CORRUPTION-INPUTS-0001: Three isolated 30-frame exploratory inputs
+
+- Status: **succeeded — source adaptation, generation, and CPU replay PASS**
+- Prepared/audited: 2026-08-01 23:08–23:13 CST
+- StateGuard3R base commit: `fb26038d087cf29e03c4a77c95a836f138c51388`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Parent 30-frame window SHA-256:
+  `8c7ade9ee01d22ebd895e034f46130aa8c6d834a80b3e24d2b5a5ca1a2b08575`
+- Shared source adapter: `baselines/ReCal3R/data/tum/derived/fr1_desk-gate2-30-corruption-source-v1/source-manifest.json`,
+  37,827 bytes, mode `0444`, SHA-256
+  `ca7f2532a529f3eb8044644d4b8434f7a2f654d55003da8f9995dad4ee2ce8cc`
+- Input bundle: `outputs/gate2-fr1desk-30-corruption-inputs-v1`, directory mode
+  `0555`; exactly three configs and three generated manifests, all mode `0444`
+- Generator SHA-256: `683132672136bdb60c940147556fc1c55ca8063c1b309bba6a4e8875975f5b5a`
+- Strict replay/materializer SHA-256:
+  `e42852f87e704c5b9b90e12a9fa10506ec6f38290b9cd1a01d065e5dc77106c2`
+- Generation/audit log: `logs/gate2-fr1desk-30-corruption-inputs-v1.log`,
+  4,946 bytes, mode `0444`, SHA-256
+  `cbd53547f235d7c4c1b59926f552d3068e09223aa1fc55961a5fcb67cd02b674`
+
+Frozen bundle hashes and sizes:
+
+```text
+dynamic-occlusion-config.json       1,333  561850ad129f9e231ad6fabb62944c2d5f82ec113656a49ca30adcc252357d56
+dynamic-occlusion-manifest.json    44,989  8a9746079ab56c7b0020de2c73f0544e6bfaeee2bb59e2fef8c4150174588485
+low-overlap-jump-config.json        1,064  0ef31b8c4bd1dc9adb5a381faf9c4c8dfc4e4d3886e781ad288a81da272d8b5a
+low-overlap-jump-manifest.json     43,026  8da158a85d19aaec12be53ea52357cf65cf038909fe59f673c0491a6e37be830
+wrong-order-segment-config.json     1,024  307f20c07a350b35211e2e819defd6f36bb2aca25b54488c20d1842be2ecf22d
+wrong-order-segment-manifest.json  42,779  b1f205411da42e96707f7d158cc9caf73f5d0f69c621ee0188ded965928259dc
+```
+
+The TUM window schema stores RGB paths under `frames[i].rgb.path`, while the
+corruption v1 generator requires `frames[i].path`. A deterministic one-file
+adapter therefore promotes each RGB path and preserves its original TUM
+timestamp text/value, raw index/line, size/hash, depth association, GT pose,
+parent-window hash, and archive/raw/text lineage. It remains beside the other
+ReCal3R derived data so its relative paths resolve directly to the same 30
+single-link read-only RGB files. Its directory is mode `0555`; it contains no
+image, link, cache, or materialized frame.
+
+Each generated `stateguard3r.corruption.v1` manifest has seed 0, exactly one
+corruption, 30 output frames, a ten-frame clean prefix, and the same absolute
+source-adapter path/hash:
+
+- `low_overlap_jump` substitutes local target positions 10–14 with source
+  indices 25–29 (raw RGB indices 42–46). The target corresponds to raw indices
+  27–31. This is an explicitly frozen distant-segment index/GT-pose proxy;
+  actual image overlap was not measured and is not claimed.
+- `dynamic_occlusion` applies a normalized red rectangle over positions 10–14.
+  It starts at `(0.25,0.25)`, has width/height 0.5, and moves by
+  `(dx,dy)=(0.04,0.025)` per frame without clipping. The coordinate reference
+  is `model_input_after_resize_and_center_crop`.
+- `wrong_order_segment` reverses positions 10–13 to source indices
+  `[13,12,11,10]`; its even length ensures all four paths change.
+
+All three strict-load checks passed. A CUDA-hidden CPU audit then used the
+official `load_images_for_eval(size=512,crop=True)` path and materialized each
+manifest in memory. Every result tensor was an independent clone; low-overlap
+and wrong-order pixels exactly matched their final ordered source paths. The
+five dynamic rectangles changed only the expected exclusive pixel boxes:
+
+```text
+(128,  96, 384, 288)  49,152 pixels
+(148, 105, 405, 298)  49,601 pixels
+(168, 115, 425, 308)  49,601 pixels
+(189, 124, 446, 317)  49,601 pixels
+(209, 134, 466, 327)  49,601 pixels
+```
+
+Every rectangle interior was exactly normalized red `[1,-1,-1]`, every pixel
+outside was unchanged, loader inputs remained unchanged, and CUDA was never
+initialized. All source RGB hashes, sizes, mtimes, modes, and link counts were
+identical before and after. No PNG or related staging, partial, or temporary
+artifact remains in the source-adapter or published bundle.
+
+The first read-only adapter audit attempted to construct an expected path by
+splitting a `../../` relative path incorrectly and raised an assertion before
+generation; it wrote nothing. The corrected check resolved both paths against
+their manifest directories and passed. This failure and retry are retained in
+the frozen log rather than hidden.
+
+This input gate is not model-forward, low-overlap measurement, detection, or a
+research result. The ten-frame prefix is also shorter than the example formal
+window of 15. It unlocks only the low-overlap exploratory GPU smoke. Dynamic
+occlusion remains sequentially locked until that run is audited and recorded;
+wrong-order remains locked until both preceding runs pass. No threshold may be
+tuned from these smoke outputs and described as frozen development calibration;
+the 50-frame, formal detection, quarantine, and rollback gates remain locked.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.

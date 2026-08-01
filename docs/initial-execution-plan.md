@@ -395,9 +395,12 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] `GATE2-FR1DESK-30-0001` 已完成连续 30 帧真实 CUDA clean ledger：29 次 update、
       trace `[1..29]`、180 个 tensor summary 全 finite，前八帧四类输出与独立八帧 run
       精确相同；推理段 3.419778 秒，峰值 allocated 显存 6,365.548 MiB，PID/GPU 已释放。
+- [x] 三类 exploratory corruption 输入已从同一 30 帧窗口冻结为三个单污染 v1
+      manifest：low-overlap index/GT-pose proxy、移动红色遮挡和偶数长度倒序彼此独立；
+      strict loader 与官方 CPU 像素 materialization 均通过，未复制或改写 raw 图片。
 - [ ] 更长 clean baseline、真实 corruption Health Ledger、formal holdout 指标和科研
-      Go/No-Go 尚无证据。下一步只允许在同一冻结 30 帧来源上准备并分别运行三类最小
-      exploratory corruption smoke；50 帧、formal detection、quarantine 和 rollback
-      继续禁入。
+      Go/No-Go 尚无证据。下一步只允许运行 low-overlap exploratory smoke；通过并登记
+      后才依次解锁 dynamic occlusion 和 wrong-order。50 帧、formal detection、
+      quarantine 和 rollback 继续禁入。
 
 状态更新规则：每完成一个阶段，立即更新本节、运行登记和验证结果；只有满足上一阶段门槛才推进下一阶段。
