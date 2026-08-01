@@ -383,8 +383,11 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] Gate 2 唯一完整包 `fr1_desk.tgz` 已按 `.part` 下载并经精确字节、gzip、tar 安全、
       SHA 和原子发布校验；raw tree 在同文件系统 staging 解压，1212 个文件逐一哈希，
       全部 RGB/depth/GT 文本格式复核后设为只读。未下载任何其他 TUM 资产。
+- [x] Gate 2 连续八帧输入已冻结为只引用 manifest：按 `rgb.txt` 原始顺序选择最早满足
+      depth/GT 唯一最近邻均不超过 20 ms 的 0-based 非注释数据行索引 17–24（物理行
+      21–28），跨度 0.231956 秒；未复制图片，raw tree、TGZ 和 raw manifest 哈希不变。
 - [ ] 更长或带 GT 的 clean baseline、真实 corruption Health Ledger、formal holdout 指标
-      和科研 Go/No-Go 尚无证据。下一步只允许 `fr1_desk` 最小 8 帧 I/O/forward 门禁；
-      30–50 帧、formal detection、quarantine 和 rollback 继续禁入。
+      和科研 Go/No-Go 尚无证据。下一步只允许运行已冻结的 `fr1_desk` 连续 8 帧
+      I/O/forward 门禁；30–50 帧、formal detection、quarantine 和 rollback 继续禁入。
 
 状态更新规则：每完成一个阶段，立即更新本节、运行登记和验证结果；只有满足上一阶段门槛才推进下一阶段。

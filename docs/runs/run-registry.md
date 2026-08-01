@@ -844,6 +844,53 @@ detection, or research result. The raw tree remains untouched; any future
 continuous-window manifest must live under the writable sibling `derived/`
 and reference the raw files without copying them.
 
+### GATE2-WINDOW8-DATA-0001: Deterministic contiguous `fr1_desk` window
+
+- Status: **reference-only input preparation and independent audit PASS**
+- Time: 2026-08-01 20:50–20:56 CST
+- StateGuard3R base commit: `4c13eba7093105de0c56847df33cbd4b3bcd25ff`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Window manifest: `baselines/ReCal3R/data/tum/derived/fr1_desk-gate2-8-v1/window-manifest.json`,
+  11,697 bytes, mode `0444`, SHA-256
+  `24548d1110af58ca5599bba5737396b8c4b96478b6a4d4f137cc832ae55e9e35`
+- Preparation script: `baselines/ReCal3R/logs/gate2-fr1-desk-window8.py`,
+  SHA-256 `110989ab9601632946f7664f131934e085b833456b252889b9b4e3cf289b2879`
+- Preparation log: `baselines/ReCal3R/logs/gate2-fr1-desk-window8.log`,
+  330 bytes, SHA-256 `c1687088896243b27aead364c92c64b67dff1c8b2c11b674d2bb20256888f93d`
+- Frozen raw-manifest SHA-256: `5908db0f357fd4a21b2c777220de38e651b48b80c7d53182123c6eb4e7163d87`
+- Frozen TGZ SHA-256: `e983d6830916e66dc4a46a71368046b149b283de87769690e7aa4e0b9483530c`
+
+The deterministic rule scans `rgb.txt` in source order and selects the earliest
+eight consecutive RGB entries for which every frame has a unique nearest depth
+and ground-truth timestamp within 0.02 seconds; ties are ordered by absolute
+delta, timestamp, then physical source line, and matches must remain unique
+within the window. The first eligible window is 0-based non-comment RGB data
+indices 17–24 (physical `rgb.txt` lines 21–28), from timestamp
+1305031453.359684 through 1305031453.591640, spanning 0.231956 seconds. Its
+maximum absolute RGB-depth delta is 0.014616966 seconds and maximum absolute
+RGB-GT delta is 0.004184008 seconds.
+
+The `stateguard3r.tum-window.v1` manifest records all eight original RGB,
+depth, and GT associations, source lines/timestamps, poses, relative paths,
+sizes, hashes, raw-manifest/archive lineage, and the original TUM timestamp
+semantics. It was written in a same-filesystem staging directory, all references
+were revalidated, then the one-file directory was atomically published and set
+read-only. No RGB or depth image was copied, linked, rewritten, or generated;
+the derived directory contains only this manifest. A separate audit rebuilt the
+earliest-window selection and every association from the three original text
+files and reproduced the same indices, deltas, paths, poses, and hashes. No
+partial or staging file remains, and the raw tree stayed read-only and unchanged.
+
+The official evaluator's `--max_frames 8` is intentionally not used for this
+gate: on this sequence it approximately samples source indices
+`[0,1,88,175,262,349,436,523]`, which is not a contiguous recurrent window.
+The next run is `GATE2-FR1DESK-8-0001` with eight explicit RGB paths and an
+expected seven updates/trace `[1..7]`. Depth and GT are provenance associations
+only because the external smoke runner consumes RGB. Therefore this data PASS
+cannot support ATE/RPE, a depth metric, long-term stability, detection, or a
+research decision, and it unlocks no 30–50-frame experiment before the
+eight-frame forward itself passes.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
