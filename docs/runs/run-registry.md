@@ -617,7 +617,12 @@ TGZ is unlocked yet.
 - Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
 - Main PID: `98422`; exit code: `0`; GPU: physical index 4
 - Source AVI SHA-256: `1820b52939af2a2e7afdf78f6398cfbc7816399c8809b3836a9ba8da9bef8022`
-- Ten-frame manifest SHA-256: `1905a62ea7aa4285c2607a009540ada2844490c279b0daea50dd5260028e6b7e`
+- External input manifest: `baselines/ReCal3R/data/tum/derived/fr1_xyz-gate1-10-v1/frame-manifest.json`,
+  SHA-256 `1905a62ea7aa4285c2607a009540ada2844490c279b0daea50dd5260028e6b7e`
+- Checkpoint: `baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth`, 3,173,761,006 bytes,
+  SHA-256 `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`
+- Configuration: CUDA, image size 512, seed 0, base beta 0.1; the hashed `run.json`
+  is the authoritative full argv including all ten explicit `--image` arguments
 - Log: `logs/gate1-fr1xyz-10-0001.log`, 13,435 bytes, SHA-256
   `1ae047ce0da226902c461ec49a4ba8db21786fb38655dd011b04fdec30fd9e14`
 - Output: `outputs/gate1-fr1xyz-10-0001`
@@ -662,6 +667,41 @@ update/reliability fields are also null by reference-frame design.
 This is only the first 0.3 seconds of RGB video without depth, original TUM
 timestamps, or GT. It cannot support ATE/RPE, long-term stability, detection,
 or quarantine claims. It unlocks only the same AVI's 30-frame smoke.
+
+### GATE1-DATA-0002: Thirty-frame prefix without duplicating frozen frames
+
+- Status: **CPU preparation and independent validation PASS**
+- Time: 2026-08-01 19:16–19:18 CST
+- StateGuard3R base commit: `762e9d7f08ab38569909aff40036634363339052`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Source AVI SHA-256: `1820b52939af2a2e7afdf78f6398cfbc7816399c8809b3836a9ba8da9bef8022`
+- Frozen ten-frame manifest SHA-256: `1905a62ea7aa4285c2607a009540ada2844490c279b0daea50dd5260028e6b7e`
+- Derived manifest: `baselines/ReCal3R/data/tum/derived/fr1_xyz-gate1-30-v1/frame-manifest.json`,
+  12,524 bytes, SHA-256 `1db34e2f88e7bbb67104dc5bc5dbbfb3b4bebfc5a0b0398b3373dacc5deee041`
+- Preparation script: `baselines/ReCal3R/logs/gate1-fr1-xyz-decode30.py`, SHA-256
+  `7f1f9db56d72ca152b36534846c91a38917d84f716d8e3727504f9cc43f98130`
+- Preparation log: `baselines/ReCal3R/logs/gate1-fr1-xyz-decode30.log`, 639 bytes,
+  SHA-256 `2d04fa9c05a46258648e49b4d8f677ea347586e17a980875cdbc1f766e6c56ca`
+
+With CUDA hidden, the pinned ReCal3R environment's OpenCV 4.11 read AVI
+indices 0–29 sequentially. Frames 0–9 were compared pixel-for-pixel with the
+frozen read-only prefix and were neither written nor copied. Only frames 10–29
+were losslessly encoded into a same-filesystem staging directory, read back,
+set to mode `0444`, validated, and atomically renamed to the final directory.
+The final directory therefore contains exactly 20 PNGs plus the manifest;
+the manifest references the old directory for indices 0–9. Actual new bytes,
+including the manifest, are 7,968,045 bytes.
+
+The v2 manifest records all 30 ordered frame indices, resolved storage policy,
+per-frame path/size/SHA/shape/dtype, nominal time, AVI metadata, OpenCV version,
+source hash, and frozen-prefix lineage. A separate post-publication audit again
+decoded indices 0–29 and compared all 30 referenced PNGs pixel-for-pixel; all
+paths, hashes, modes, shapes, dtypes, and index sets matched. The source AVI
+and old manifest hashes remained unchanged, and no partial file remained.
+
+This is data preparation only and used no GPU. It unlocks exactly
+`GATE1-FR1XYZ-30-0001`; the TUM TGZ, ATE/RPE, formal detection,
+quarantine, and rollback remain locked until that run passes its own gate.
 
 ## Experiment record template
 
