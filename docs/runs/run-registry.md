@@ -608,6 +608,61 @@ support ATE/RPE or a formal research conclusion. The next gate is a ten-frame
 GPU run with exactly nine updates; neither the 30-frame expansion nor the TUM
 TGZ is unlocked yet.
 
+### GATE1-FR1XYZ-10-0001: Ten-frame continuous RGB smoke
+
+- Status: **succeeded — ten-frame Gate 1 sub-gate PASS**
+- Start/end: 2026-08-01 18:51:24–18:51:51 CST
+- StateGuard3R commit: `95033bad226df5d13fad3e2481c90aba27050dcb`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
+- Main PID: `98422`; exit code: `0`; GPU: physical index 4
+- Source AVI SHA-256: `1820b52939af2a2e7afdf78f6398cfbc7816399c8809b3836a9ba8da9bef8022`
+- Ten-frame manifest SHA-256: `1905a62ea7aa4285c2607a009540ada2844490c279b0daea50dd5260028e6b7e`
+- Log: `logs/gate1-fr1xyz-10-0001.log`, 13,435 bytes, SHA-256
+  `1ae047ce0da226902c461ec49a4ba8db21786fb38655dd011b04fdec30fd9e14`
+- Output: `outputs/gate1-fr1xyz-10-0001`
+
+The exact clean-run argv in `run.json` lists the ten read-only PNGs strictly
+from `frame_000000.png` through `frame_000009.png`; `run.json.input_manifest`
+is `null` because the video-frame manifest is not the corruption schema. This
+registry externally binds every run input to the manifest and source AVI.
+Two immediate preflight snapshots found GPU 4 at 45,586 MiB free, 0%
+utilization, P8, and no compute PID.
+
+All ten frames completed with nine expected/observed calibrated updates and
+trace steps `[1,2,3,4,5,6,7,8,9]`. Health, trajectory, prediction, input, and
+manifest frame IDs aligned exactly to 0–9; all recorded numeric values and 60
+tensor summaries were finite. Frames 1–9 contained non-null, non-constant real
+signals: geometric residual ranged 0.00716487–0.01079948, pose jump
+0.00945283–0.02421211, uncertainty 0.79086339–0.80310434, reliability
+0.19689566–0.20913661, and `global_state_delta` 0.88016944–1.28335999.
+Reliability and pose-jump formulas independently recomputed within numerical
+precision.
+
+Inference-scope runtime was 1.988277 seconds, 5.029481 FPS, and peak allocated
+memory was 6,364.891 MiB; the 26.761966-second wall time includes loading.
+After exit, PID `98422` was absent and GPU 4 returned to 4 MiB with no compute
+process. Checkpoint, AVI, manifest, runner, relpose source, cuRoPE, and all ten
+input hashes remained unchanged.
+
+Output hashes:
+
+```text
+checkpoint-load-audit.json  3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d
+health.jsonl                151435ad8312206042c2208946e9e2435f7a4f090f262142aae8d36be38fa04a
+predictions-summary.json    78f6dafcc67f0f1a458a1351a0d3d83d52b06f11caa7f1134dc2ad57cfc2fb4c
+run.json                    08b8e4adab654bfff0d8604c092fd780427d0475ba90779bd07f9ed01ceffceb
+trajectory.json             f17f3677eae35fd83b1173ea9d531c5e00c87269f34bda309cc7359deee0b085
+```
+
+Candidate/final beta, internal `update_magnitude`, local-memory delta,
+overlap, risk/decision, and timestamp remain `null`; the first-frame
+update/reliability fields are also null by reference-frame design.
+`run.json.log_path` is null, so the external log binding above is authoritative.
+This is only the first 0.3 seconds of RGB video without depth, original TUM
+timestamps, or GT. It cannot support ATE/RPE, long-term stability, detection,
+or quarantine claims. It unlocks only the same AVI's 30-frame smoke.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
