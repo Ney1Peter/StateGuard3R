@@ -961,6 +961,53 @@ or quarantine. It unlocks only a reference-only contiguous 30-frame clean
 ledger preparation and smoke, not a research Go decision or 50-frame/formal
 corruption experiment.
 
+### GATE2-WINDOW30-DATA-0001: Deterministic contiguous 30-frame `fr1_desk` window
+
+- Status: **succeeded — Gate 2 30-frame input preparation PASS**
+- Prepared/audited: 2026-08-01 21:39–21:41 CST
+- StateGuard3R commit: `e326be3acb19f1a92147747f6de4e4802b8c43dc`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Window manifest: `baselines/ReCal3R/data/tum/derived/fr1_desk-gate2-30-v1/window-manifest.json`,
+  38,255 bytes, SHA-256
+  `8c7ade9ee01d22ebd895e034f46130aa8c6d834a80b3e24d2b5a5ca1a2b08575`
+- Parent eight-frame manifest SHA-256:
+  `24548d1110af58ca5599bba5737396b8c4b96478b6a4d4f137cc832ae55e9e35`
+- Raw-manifest SHA-256: `5908db0f357fd4a21b2c777220de38e651b48b80c7d53182123c6eb4e7163d87`
+- TGZ: 344,011,403 bytes, SHA-256
+  `e983d6830916e66dc4a46a71368046b149b283de87769690e7aa4e0b9483530c`
+- Materialization: references only; one manifest, no copied or linked image
+
+The same deterministic rule as the eight-frame gate was extended to the
+earliest 30 consecutive entries whose independent nearest depth and ground
+truth timestamps are unique within the window and no more than 20 ms away.
+This selects 0-based non-comment RGB indices 17–46 (physical `rgb.txt` lines
+21–50), timestamps 1305031453.359684–1305031454.327699, and a
+0.968014956-second span. All 30 depth and all 30 ground-truth associations are
+unique; maximum absolute RGB-depth and RGB-GT deltas are respectively
+0.014616966 and 0.004184008 seconds. Every earlier possible start fails the
+20-ms depth condition.
+
+The manifest freezes all 30 RGB/depth file sizes and hashes, all source lines
+and exact timestamp text, GT poses, TGZ/raw-manifest/text-file provenance, and
+the parent manifest path/hash. Its first eight frame objects are structurally
+identical to the already-passed eight-frame manifest. An independent audit
+rebuilt the earliest-window search and every association from the raw text,
+then matched every referenced raw file against the raw manifest. The derived
+directory is mode `0555`, its only file is mode `0444`, and all selected raw
+files remain single-link read-only files. Both tracked worktrees were clean at
+publication, no partial or staging path remains, and no new dataset was
+downloaded.
+
+This input PASS unlocks only `GATE2-FR1DESK-30-0001` from a clean commit with
+30 explicit ordered RGB paths. Required invariants are 29 calibrated updates,
+trace `[1..29]`, 180 finite tensor summaries, exact cross-file frame alignment,
+and a first-eight-frame output prefix equal to the independent eight-frame run.
+Depth and GT remain external provenance and are not consumed by this RGB-only
+runner, so
+the prepared input cannot support ATE/RPE, depth metrics, detection, long-term
+stability, or a research Go. The 50-frame, formal corruption/detection, and
+quarantine gates remain locked.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
