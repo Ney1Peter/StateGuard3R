@@ -29,6 +29,7 @@ import math
 import os
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -595,6 +596,32 @@ def _validated_official_lineage(value: Any, *, name: str) -> dict[str, Any]:
 
 def _validated_line_provenance(value: Mapping[str, Any], *, name: str) -> dict[str, Any]:
     timestamp = _finite_number(value["timestamp"], name=f"{name}.timestamp")
+    timestamp_text = _nonempty_string(
+        value["timestamp_text"], name=f"{name}.timestamp_text"
+    )
+    if re.fullmatch(
+        r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?",
+        timestamp_text,
+    ) is None:
+        raise ValueError(f"{name}.timestamp_text must be a decimal number")
+    try:
+        timestamp_decimal = Decimal(timestamp_text)
+    except InvalidOperation as error:
+        raise ValueError(f"{name}.timestamp_text must be a decimal number") from error
+    if not timestamp_decimal.is_finite():
+        raise ValueError(f"{name}.timestamp_text must be finite")
+    try:
+        timestamp_from_text = float(timestamp_decimal)
+    except (OverflowError, ValueError) as error:
+        raise ValueError(
+            f"{name}.timestamp_text is outside the finite JSON number range"
+        ) from error
+    if not math.isfinite(timestamp_from_text):
+        raise ValueError(
+            f"{name}.timestamp_text is outside the finite JSON number range"
+        )
+    if timestamp != timestamp_from_text:
+        raise ValueError(f"{name}.timestamp and timestamp_text disagree")
     return {
         "source_entry_index": _strict_integer(
             value["source_entry_index"],
@@ -613,9 +640,7 @@ def _validated_line_provenance(value: Mapping[str, Any], *, name: str) -> dict[s
             minimum=1,
         ),
         "timestamp": timestamp,
-        "timestamp_text": _nonempty_string(
-            value["timestamp_text"], name=f"{name}.timestamp_text"
-        ),
+        "timestamp_text": timestamp_text,
     }
 
 
@@ -623,8 +648,8 @@ def _validated_association_delta(
     value: Mapping[str, Any],
     *,
     name: str,
-    rgb_timestamp: float,
-    associated_timestamp: float,
+    rgb_timestamp_text: str,
+    associated_timestamp_text: str,
 ) -> tuple[float, float]:
     signed = _finite_number(
         value["delta_from_rgb_seconds"], name=f"{name}.delta_from_rgb_seconds"
@@ -632,20 +657,23 @@ def _validated_association_delta(
     absolute = _finite_number(
         value["absolute_delta_seconds"], name=f"{name}.absolute_delta_seconds"
     )
-    if absolute < 0 or absolute > MAX_ASSOCIATION_DELTA_SECONDS:
+    signed_decimal = Decimal(str(signed))
+    absolute_decimal = Decimal(str(absolute))
+    expected_decimal = Decimal(associated_timestamp_text) - Decimal(
+        rgb_timestamp_text
+    )
+    maximum_decimal = Decimal(str(MAX_ASSOCIATION_DELTA_SECONDS))
+    if absolute_decimal < 0 or absolute_decimal > maximum_decimal:
         raise ValueError(
             f"{name}.absolute_delta_seconds must be in [0, "
             f"{MAX_ASSOCIATION_DELTA_SECONDS}]"
         )
-    if not math.isclose(absolute, abs(signed), rel_tol=0.0, abs_tol=1e-12):
-        raise ValueError(f"{name} signed/absolute association deltas disagree")
-    if not math.isclose(
-        signed,
-        associated_timestamp - rgb_timestamp,
-        rel_tol=0.0,
-        abs_tol=1e-9,
-    ):
+    if signed_decimal != expected_decimal:
         raise ValueError(f"{name} timestamp and declared association delta disagree")
+    if absolute_decimal != abs(expected_decimal):
+        raise ValueError(
+            f"{name} timestamp and declared absolute association delta disagree"
+        )
     return signed, absolute
 
 
@@ -1095,8 +1123,8 @@ def _validated_formal_source_manifest(
         _validated_association_delta(
             depth,
             name=f"{name}.depth",
-            rgb_timestamp=line["timestamp"],
-            associated_timestamp=depth_line["timestamp"],
+            rgb_timestamp_text=line["timestamp_text"],
+            associated_timestamp_text=depth_line["timestamp_text"],
         )
         depth_snapshot = _validated_snapshot_artifact(
             {
@@ -1134,8 +1162,8 @@ def _validated_formal_source_manifest(
         _validated_association_delta(
             groundtruth,
             name=f"{name}.groundtruth",
-            rgb_timestamp=line["timestamp"],
-            associated_timestamp=gt_line["timestamp"],
+            rgb_timestamp_text=line["timestamp_text"],
+            associated_timestamp_text=gt_line["timestamp_text"],
         )
         for field, count in (("translation_xyz", 3), ("quaternion_xyzw", 4)):
             values = groundtruth[field]
