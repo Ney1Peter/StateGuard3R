@@ -109,6 +109,76 @@ The input/protocol gate is committed before development GPU execution.  Git
 does not track the manifests, ledgers, raw data, logs, checkpoint, or generated
 metrics.
 
+## Realized input freeze 0001
+
+The manifest-only input build at
+`outputs/formal-v1-inputs-0001` completed before any formal GPU forward.  It
+was generated from StateGuard3R commit
+`56bb55bb5fee7e66d2d9fd8c917c67262a347939`; the tracked
+`scripts/prepare_formal_pilot_inputs.py` blob had SHA-256
+`f895a0a47f3fb1f13b883fa646cc68a9dc92434021fd80fb803c9e07526fef23`.
+The tree contains only the root, eight directories, and fifteen JSON files
+(24 nodes in total): every directory is mode `0555`, every file is mode
+`0444`, and there are no copied or linked images.
+
+The realized top-level artifacts are:
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `formal-pilot-manifest.json` | 491575 | `1de55c281a780002d8961fd5a05cb507fd1168804aaf1c493c2e48b459d77932` |
+| `split-registry.json` | 314466 | `f07cc9661b47ff42a89e30151f72b48c3855309a5d74f6af5d47524a4891bd9d` |
+| `holdout-commitment.json` | 157262 | `f146161aeec23ed5174969a806f3fc55e701a28c37c01695f33e46267f2dc8c7` |
+
+Each input manifest is also the exact corruption JSON consumed by the strict
+loader.  The six realized run artifacts are:
+
+| Run | Source manifest (bytes, SHA-256) | Input/corruption manifest (bytes, SHA-256) |
+| --- | --- | --- |
+| `development-dynamic` | 76416, `61248aa0a417102b104109eb2c2e57a5841878203f40fab4be6a52358b7c4284` | 84689, `264b0c9e4f04f4da9e26a634ed008342d32c7b561d7b6ee4f9eb90d1688189c8` |
+| `development-wrong` | 76468, `a61efdb96b2f8740ac5839e415ff9211e015bcdd92a509ff81d034fcde375281` | 82571, `860c45ba688da966f01df559b718e33a318352673c65d8787645b563d7e8f669` |
+| `development-low` | 88676, `f446e7eb9a518847dec6dd53dcf93d55fcf3b6a2af184b427d66d3a6bd823fd7` | 82754, `72eeb1dc297992b14a6a3bd5e166832a5220ee16df82dfc9d39aefec25aec0c0` |
+| `holdout-dynamic` | 76338, `575fdd90a46a529897f70728b10e616c1584a4481d20716af2aa9028e1aefae1` | 84615, `328ec2387ddffa38f606a73ed6b19e61742f9d2f17f76395bfe46dbad6d83405` |
+| `holdout-wrong` | 76375, `72b82efa8e786a7aabd61746bcfe56e014ff187a8243da141afa99df25912ab6` | 82482, `d3bf2a7c0069e51e410d0b1591423058a7118c922a2f78c8d8eed3fc6ae45ba0` |
+| `holdout-low` | 88675, `32454242412ed2db5caf339b8bf085b577026496112a83f9abf7ab1a7a134ef1` | 82745, `5ddcfd0bfc8682dd3b727419c70ded22b2443758c54ba2053d93ccc27704d556` |
+
+The build binds the official archive (344011403 bytes, SHA-256
+`e983d6830916e66dc4a46a71368046b149b283de87769690e7aa4e0b9483530c`)
+and raw manifest (231139 bytes, SHA-256
+`5908db0f357fd4a21b2c777220de38e651b48b80c7d53182123c6eb4e7163d87`).
+Its complete-allocation proof contains 190 unique RGB, 190 unique depth, and
+190 unique ground-truth identities; all 15 run-pair intersections are zero
+for every identity class.  The actual-model-input projection contains 180
+unique identities in each class.  Independent Decimal timestamp replay found
+190 RGB and 380 depth/ground-truth associations with no mismatch.  Depth
+deltas span `[-0.017879, -0.001605]` seconds and ground-truth deltas span
+`[-0.004740, 0.004153]` seconds, within the frozen 0.02-second bound.
+The validator's canonical-JSON SHA-256 digests are
+`7cc9051daaf2cf1387b4ffe22ae404f04f0b38ae9b87fb24af99d8e8422be2da`
+for the 24-node input tree,
+`850d2da4dee6ecb0a9595fb873aece5f31429056fac56baddcadc1a5cacf9348`
+for the 385 distinct raw-source snapshots, and
+`2661cf1bed308ad64c56b8e18453cae65edd788cbfff8bd4433b54e4bbb336d1`
+for the 190 independently reconstructed association records.
+
+The two low-overlap constructions remain pose proxies only.  For
+`development-low`, the five donor/base pairs have translation separation
+minimum/mean/maximum `1.5253540015353815 / 1.561770178919186 /
+1.59426172882623` metres and rotation separation
+`1.3860445738485307 / 1.4042530664398112 / 1.427665129672411` radians.  For
+`holdout-low`, the corresponding values are
+`0.68750873448997 / 0.7055181187504569 / 0.7236794179745614` metres and
+`0.6730589010037727 / 0.6767409395649828 / 0.6794784641139863` radians.
+These values do not measure image overlap and support no overlap-percentage
+claim.
+
+The forthcoming runtime remains pinned to ReCal3R commit
+`466c7cdf3acd2f589f1d82e5f6391966f19db9ff`, runner SHA-256
+`091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`,
+and the 3173761006-byte checkpoint SHA-256
+`45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`.
+At this freeze the scientific status remains **HOLD — evidence pending**: no
+formal development or holdout response has been generated or inspected.
+
 ## Fixed execution order and resource gate
 
 The exact run IDs and global forward order are:
