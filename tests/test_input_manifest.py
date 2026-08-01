@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import json
 from pathlib import Path
 
@@ -65,6 +66,50 @@ def _generated_manifest(tmp_path: Path) -> tuple[Path, list[Path]]:
     return output_path, frame_paths
 
 
+def _generated_source_pool_manifest(
+    tmp_path: Path,
+) -> tuple[Path, Path, list[Path]]:
+    frame_paths: list[Path] = []
+    frames: list[dict[str, object]] = []
+    for index in range(5):
+        path = tmp_path / f"pool_{index}.png"
+        path.write_bytes(f"source-pool-{index}".encode())
+        frame_paths.append(path)
+        frames.append(
+            {
+                "path": path.name,
+                "timestamp": index / 10,
+                "raw_rgb_source_index": 100 + index,
+            }
+        )
+    source_path = tmp_path / "source-pool.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "sequence": "source-pool",
+                "frames": frames,
+                "output_frame_count": 3,
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "source-pool-corruption.json"
+    generate_corruption_manifest(
+        source_path,
+        output_path,
+        [
+            {
+                "type": "low_overlap_jump",
+                "start": 1,
+                "end": 1,
+                "parameters": {"source_start": 3},
+            }
+        ],
+        check_paths=True,
+    )
+    return output_path, source_path, frame_paths
+
+
 def _file_state(paths: list[Path]) -> dict[Path, tuple[bytes, int]]:
     return {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
 
@@ -108,6 +153,211 @@ def test_materializer_preserves_final_order_clones_and_applies_rgb_fill(
     np.testing.assert_allclose(loaded[2]["img"], 0.2)
     assert _file_state(frame_paths) == before
     assert sorted(tmp_path.rglob("*.png")) == frame_paths
+
+
+def test_source_pool_donors_beyond_output_range_load_and_materialize_read_only(
+    tmp_path: Path,
+) -> None:
+    frame_dir = tmp_path / "frames"
+    frame_dir.mkdir()
+    frame_paths: list[Path] = []
+    source_frames: list[dict[str, object]] = []
+    for index in range(35):
+        path = frame_dir / f"frame_{index:03d}.png"
+        path.write_bytes(f"immutable-source-pool-{index}".encode())
+        path.chmod(0o444)
+        frame_paths.append(path)
+        source_frames.append(
+            {"path": f"frames/{path.name}", "timestamp": index / 10}
+        )
+    source_path = tmp_path / "source.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "sequence": "source-pool",
+                "frames": source_frames,
+                "output_frame_count": 30,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    source_path.chmod(0o444)
+    source_before = (source_path.read_bytes(), source_path.stat().st_mtime_ns)
+    frames_before = _file_state(frame_paths)
+    output_path = tmp_path / "corruption.json"
+
+    generated = generate_corruption_manifest(
+        source_path,
+        output_path,
+        [
+            {
+                "type": "low_overlap_jump",
+                "start": 15,
+                "end": 19,
+                "parameters": {"source_start": 30},
+            }
+        ],
+        check_paths=True,
+    )
+    assert generated["source_manifest_sha256"] == hashlib.sha256(
+        source_before[0]
+    ).hexdigest()
+    assert (source_path.read_bytes(), source_path.stat().st_mtime_ns) == source_before
+    assert _file_state(frame_paths) == frames_before
+
+    manifest = load_input_manifest(output_path)
+    assert len(manifest.frames) == 30
+    assert [manifest.frames[index].source_index for index in range(15, 20)] == list(
+        range(30, 35)
+    )
+    assert (source_path.read_bytes(), source_path.stat().st_mtime_ns) == source_before
+    assert _file_state(frame_paths) == frames_before
+
+    seen_paths: list[str] = []
+    loaded: list[dict[str, object]] = []
+
+    def loader(paths: list[str]):
+        seen_paths.extend(paths)
+        for path in paths:
+            source_index = int(Path(path).stem.split("_")[-1])
+            loaded.append(
+                {"img": np.full((1, 3, 1, 1), source_index, dtype=np.float32)}
+            )
+        return loaded
+
+    output = materialize_manifest_views(output_path, loader)
+
+    assert len(seen_paths) == 30
+    assert [Path(path).name for path in seen_paths[15:20]] == [
+        f"frame_{index:03d}.png" for index in range(30, 35)
+    ]
+    assert len(output) == 30
+    assert len({id(view["img"]) for view in output}) == 30
+    assert all(
+        result["img"] is not source["img"]
+        for result, source in zip(output, loaded, strict=True)
+    )
+    assert (source_path.read_bytes(), source_path.stat().st_mtime_ns) == source_before
+    assert _file_state(frame_paths) == frames_before
+
+
+def test_loader_binds_frame_count_to_source_output_frame_count(tmp_path: Path) -> None:
+    manifest_path, _, _ = _generated_source_pool_manifest(tmp_path)
+
+    def expand_with_clean_donor(payload):
+        payload["frame_count"] = 4
+        payload["frames"].append(
+            {
+                "frame_index": 3,
+                "source_index": 3,
+                "path": "pool_3.png",
+                "metadata": {
+                    "timestamp": 0.3,
+                    "raw_rgb_source_index": 103,
+                },
+                "transforms": [],
+            }
+        )
+
+    _mutate_manifest(manifest_path, expand_with_clean_donor)
+
+    with pytest.raises(InputManifestError, match="source output_frame_count"):
+        load_input_manifest(manifest_path)
+
+
+@pytest.mark.parametrize("output_frame_count", [True, 0, 6, 3.0, "3"])
+def test_loader_strictly_validates_source_output_frame_count(
+    tmp_path: Path, output_frame_count: object
+) -> None:
+    manifest_path, source_path, _ = _generated_source_pool_manifest(tmp_path)
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["output_frame_count"] = output_frame_count
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    _mutate_manifest(
+        manifest_path,
+        lambda payload: payload.__setitem__("source_manifest_sha256", source_sha256),
+    )
+
+    with pytest.raises(InputManifestError, match="source output_frame_count"):
+        load_input_manifest(manifest_path)
+
+
+def test_loader_rejects_low_overlap_label_frame_provenance_mismatch(
+    tmp_path: Path,
+) -> None:
+    manifest_path, _, _ = _generated_source_pool_manifest(tmp_path)
+
+    def contradict_label(payload):
+        parameters = payload["corruptions"][0]["parameters"]
+        parameters["source_start"] = 4
+        parameters["source_end"] = 4
+        parameters["source_indices"] = [4]
+
+    _mutate_manifest(manifest_path, contradict_label)
+
+    with pytest.raises(InputManifestError, match="provenance disagrees"):
+        load_input_manifest(manifest_path)
+
+
+def test_loader_rejects_low_overlap_label_outside_declared_donor_pool(
+    tmp_path: Path,
+) -> None:
+    manifest_path, _, _ = _generated_source_pool_manifest(tmp_path)
+
+    def move_label_to_base(payload):
+        parameters = payload["corruptions"][0]["parameters"]
+        parameters["source_start"] = 0
+        parameters["source_end"] = 0
+        parameters["source_indices"] = [0]
+
+    _mutate_manifest(manifest_path, move_label_to_base)
+
+    with pytest.raises(InputManifestError, match="outside the declared donor pool"):
+        load_input_manifest(manifest_path)
+
+
+def test_loader_rejects_source_pool_identity_overlap_even_when_hash_is_updated(
+    tmp_path: Path,
+) -> None:
+    manifest_path, source_path, _ = _generated_source_pool_manifest(tmp_path)
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["frames"][4]["raw_rgb_source_index"] = source["frames"][0][
+        "raw_rgb_source_index"
+    ]
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    _mutate_manifest(
+        manifest_path,
+        lambda payload: payload.__setitem__("source_manifest_sha256", source_sha256),
+    )
+
+    with pytest.raises(InputManifestError, match="raw index"):
+        load_input_manifest(manifest_path)
+
+
+@pytest.mark.parametrize(
+    "metadata_key", ["rgb_sha256", "content_sha256", "sha256"]
+)
+def test_loader_rejects_declared_source_hash_that_disagrees_with_file(
+    tmp_path: Path, metadata_key: str
+) -> None:
+    manifest_path, _ = _generated_manifest(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    source_path = Path(manifest["source_manifest"])
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["frames"][0][metadata_key] = "0" * 64
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    _mutate_manifest(
+        manifest_path,
+        lambda payload: payload.__setitem__("source_manifest_sha256", source_sha256),
+    )
+
+    with pytest.raises(InputManifestError, match="actual file SHA-256"):
+        load_input_manifest(manifest_path)
 
 
 class _FakeTensor:
@@ -173,6 +423,39 @@ def _mutate_manifest(path: Path, mutation) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     mutation(payload)
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_wrong_order_label_permutation_is_bound_to_every_replacement(
+    tmp_path: Path,
+) -> None:
+    manifest_path, _ = _generated_manifest(tmp_path)
+
+    def contradict_frames(payload):
+        parameters = payload["corruptions"][2]["parameters"]
+        parameters["mode"] = "shuffle"
+        parameters["permutation"] = [3, 4]
+        parameters["relative_permutation"] = [0, 1]
+
+    _mutate_manifest(manifest_path, contradict_frames)
+    with pytest.raises(InputManifestError, match="corruption label"):
+        load_input_manifest(manifest_path)
+
+
+def test_dynamic_transform_cannot_hide_a_source_frame_substitution(
+    tmp_path: Path,
+) -> None:
+    manifest_path, _ = _generated_manifest(tmp_path)
+
+    def substitute_dynamic_source(payload):
+        source = payload["frames"][1]
+        target = payload["frames"][2]
+        target["source_index"] = source["source_index"]
+        target["path"] = source["path"]
+        target["metadata"] = copy.deepcopy(source["metadata"])
+
+    _mutate_manifest(manifest_path, substitute_dynamic_source)
+    with pytest.raises(InputManifestError, match="non-replacement frame"):
+        load_input_manifest(manifest_path)
 
 
 @pytest.mark.parametrize(

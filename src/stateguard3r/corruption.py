@@ -44,6 +44,12 @@ SUPPORTED_CORRUPTIONS = (
     "dynamic_occlusion",
     "wrong_order_segment",
 )
+SOURCE_CONTENT_SHA256_KEYS = ("rgb_sha256", "content_sha256", "sha256")
+SOURCE_RAW_INDEX_KEYS = (
+    "raw_rgb_source_index",
+    "raw_source_index",
+    "raw_index",
+)
 
 EXPECTED_EFFECTS = {
     "low_overlap_jump": "pose drift and local geometry inconsistency",
@@ -122,6 +128,22 @@ def _normalise_source_frames(
     return frames
 
 
+def _output_frame_count(
+    source_manifest: Mapping[str, Any], source_frame_count: int
+) -> int:
+    if "output_frame_count" not in source_manifest:
+        return source_frame_count
+    frame_count = _require_plain_int(
+        source_manifest["output_frame_count"], "output_frame_count"
+    )
+    if frame_count < 1 or frame_count > source_frame_count:
+        raise CorruptionManifestError(
+            "output_frame_count must be between 1 and the source frame count "
+            f"({source_frame_count})"
+        )
+    return frame_count
+
+
 def _validate_source_paths(
     frames: Sequence[Mapping[str, Any]], base_dir: Path
 ) -> None:
@@ -163,6 +185,129 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _source_frame_identity(
+    frame: Mapping[str, Any], base_dir: Path, frame_index: int
+) -> dict[str, Any]:
+    candidate = Path(str(frame["path"]))
+    if not candidate.is_absolute():
+        candidate = base_dir / candidate
+    try:
+        resolved_path = candidate.resolve(strict=False)
+    except (OSError, RuntimeError):
+        resolved_path = Path(os.path.abspath(candidate))
+
+    inode: tuple[int, int] | None = None
+    actual_content_sha256: str | None = None
+    try:
+        stat_result = resolved_path.stat()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise CorruptionManifestError(
+            f"cannot inspect source frame {frame_index} identity: {resolved_path}: "
+            f"{error}"
+        ) from error
+    else:
+        inode = (stat_result.st_dev, stat_result.st_ino)
+        if resolved_path.is_file():
+            try:
+                actual_content_sha256 = _sha256_file(resolved_path)
+            except OSError as error:
+                raise CorruptionManifestError(
+                    f"cannot hash source frame {frame_index}: {resolved_path}: {error}"
+                ) from error
+
+    metadata = frame["metadata"]
+    declared_content_sha256: set[str] = set()
+    for key in SOURCE_CONTENT_SHA256_KEYS:
+        if key not in metadata:
+            continue
+        value = metadata[key]
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdefABCDEF" for character in value)
+        ):
+            raise CorruptionManifestError(
+                f"source frame {frame_index} metadata {key} must be a SHA-256"
+            )
+        declared = value.lower()
+        if actual_content_sha256 is not None and declared != actual_content_sha256:
+            raise CorruptionManifestError(
+                f"source frame {frame_index} metadata {key} does not match actual "
+                "file SHA-256"
+            )
+        declared_content_sha256.add(declared)
+
+    content_sha256 = set(declared_content_sha256)
+    if actual_content_sha256 is not None:
+        content_sha256.add(actual_content_sha256)
+
+    raw_indices: set[int] = set()
+    for key in SOURCE_RAW_INDEX_KEYS:
+        if key not in metadata:
+            continue
+        raw_indices.add(
+            _require_plain_int(
+                metadata[key], f"source frame {frame_index} metadata {key}"
+            )
+        )
+    if len(raw_indices) > 1:
+        raise CorruptionManifestError(
+            f"source frame {frame_index} metadata raw-index fields must agree"
+        )
+
+    return {
+        "resolved_path": str(resolved_path),
+        "inode": inode,
+        "content_sha256": content_sha256,
+        "raw_index": next(iter(raw_indices), None),
+    }
+
+
+def _source_identity_overlap(
+    left: Mapping[str, Any], right: Mapping[str, Any]
+) -> list[str]:
+    reasons: list[str] = []
+    if left["resolved_path"] == right["resolved_path"]:
+        reasons.append("resolved path")
+    if left["inode"] is not None and left["inode"] == right["inode"]:
+        reasons.append("inode")
+    if left["content_sha256"] & right["content_sha256"]:
+        reasons.append("content SHA-256")
+    if left["raw_index"] is not None and left["raw_index"] == right["raw_index"]:
+        reasons.append("raw index")
+    return reasons
+
+
+def _validate_source_pool_disjoint(
+    frames: Sequence[Mapping[str, Any]], output_frame_count: int, base_dir: Path
+) -> None:
+    identities = [
+        _source_frame_identity(frame, base_dir, frame_index)
+        for frame_index, frame in enumerate(frames)
+    ]
+    for donor_index in range(output_frame_count, len(frames)):
+        for base_index in range(output_frame_count):
+            reasons = _source_identity_overlap(
+                identities[donor_index], identities[base_index]
+            )
+            if reasons:
+                raise CorruptionManifestError(
+                    f"source-pool donor frame {donor_index} overlaps output/base "
+                    f"frame {base_index} by {', '.join(reasons)}"
+                )
+
+
+def _validate_declared_source_hashes(
+    frames: Sequence[Mapping[str, Any]], base_dir: Path
+) -> None:
+    for frame_index, frame in enumerate(frames):
+        metadata = frame["metadata"]
+        if any(key in metadata for key in SOURCE_CONTENT_SHA256_KEYS):
+            _source_frame_identity(frame, base_dir, frame_index)
 
 
 def _output_frame(
@@ -256,6 +401,7 @@ def _apply_low_overlap_jump(
     source_frames: Sequence[Mapping[str, Any]],
     spec: Mapping[str, Any],
     rng: random.Random,
+    donor_pool_start: int | None,
 ) -> dict[str, Any]:
     start = spec["start"]
     end = spec["end"]
@@ -267,14 +413,23 @@ def _apply_low_overlap_jump(
     source_start = parameters.get("source_start")
     selection = "explicit"
     if source_start is None:
+        candidate_start = donor_pool_start if donor_pool_start is not None else 0
         candidates = [
             candidate
-            for candidate in range(0, len(source_frames) - length + 1)
+            for candidate in range(
+                candidate_start, len(source_frames) - length + 1
+            )
             if target_indices.isdisjoint(range(candidate, candidate + length))
         ]
         if not candidates:
+            location = (
+                " in the declared donor pool"
+                if donor_pool_start is not None
+                else ""
+            )
             raise CorruptionManifestError(
                 "low_overlap_jump needs a disjoint source segment of equal length"
+                + location
             )
         greatest_distance = max(abs(candidate - start) for candidate in candidates)
         farthest = [
@@ -288,6 +443,11 @@ def _apply_low_overlap_jump(
         source_start = _require_plain_int(source_start, "source_start")
 
     source_end = source_start + length - 1
+    if donor_pool_start is not None and source_start < donor_pool_start:
+        raise CorruptionManifestError(
+            "low_overlap_jump source range must be inside the declared donor pool "
+            f"[{donor_pool_start}, {len(source_frames) - 1}]"
+        )
     if source_start < 0 or source_end >= len(source_frames):
         raise CorruptionManifestError(
             f"low_overlap_jump source range [{source_start}, {source_end}] is out of bounds"
@@ -533,6 +693,8 @@ def build_corruption_manifest(
         raise CorruptionManifestError("source manifest must be a JSON object")
     seed = _require_plain_int(seed, "seed")
     source_frames = _normalise_source_frames(source_manifest)
+    has_declared_source_pool = "output_frame_count" in source_manifest
+    output_frame_count = _output_frame_count(source_manifest, len(source_frames))
     base_dir = Path(source_base_dir) if source_base_dir is not None else Path.cwd()
     source_ground_truth_path, ground_truth_path = _resolve_source_ground_truth(
         source_manifest, base_dir
@@ -551,11 +713,15 @@ def build_corruption_manifest(
                 "source ground_truth_path does not exist or is not a file: "
                 f"{ground_truth_path}"
             )
+    if has_declared_source_pool:
+        _validate_source_pool_disjoint(source_frames, output_frame_count, base_dir)
+    else:
+        _validate_declared_source_hashes(source_frames, base_dir)
 
-    specs = _normalise_specs(corruption_specs, len(source_frames))
+    specs = _normalise_specs(corruption_specs, output_frame_count)
     frames = [
         _output_frame(frame, frame_index, frame_index)
-        for frame_index, frame in enumerate(source_frames)
+        for frame_index, frame in enumerate(source_frames[:output_frame_count])
     ]
     labels: list[dict[str, Any]] = []
     for spec_index, spec in enumerate(specs):
@@ -563,7 +729,11 @@ def build_corruption_manifest(
         rng = _derived_rng(seed, spec_index, corruption_type)
         if corruption_type == "low_overlap_jump":
             exact_parameters = _apply_low_overlap_jump(
-                frames, source_frames, spec, rng
+                frames,
+                source_frames,
+                spec,
+                rng,
+                output_frame_count if has_declared_source_pool else None,
             )
         elif corruption_type == "dynamic_occlusion":
             exact_parameters = _apply_dynamic_occlusion(frames, spec, rng)

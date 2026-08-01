@@ -17,6 +17,7 @@ import math
 import numbers
 import os
 from pathlib import Path
+import stat
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
@@ -26,12 +27,20 @@ SCHEMA_VERSION = "stateguard3r.corruption.v1"
 MATERIALIZATION_MODE = "deferred_transforms_no_image_copy"
 INDEX_CONVENTION = "zero_based_inclusive"
 RECTANGLE_COORDINATE_REFERENCE = "model_input_after_resize_and_center_crop"
+FORMAL_SOURCE_SCHEMA_VERSION = "stateguard3r.tum-formal-pilot-source.v1"
+FORMAL_RAW_MANIFEST_SCHEMA_VERSION = "stateguard3r.tum-raw-audit.v1"
 
 CORRUPTION_TO_TRANSFORM = {
     "low_overlap_jump": "source_frame_substitution",
     "dynamic_occlusion": "rectangle_occlusion",
     "wrong_order_segment": "temporal_reorder",
 }
+SOURCE_CONTENT_SHA256_KEYS = ("rgb_sha256", "content_sha256", "sha256")
+SOURCE_RAW_INDEX_KEYS = (
+    "raw_rgb_source_index",
+    "raw_source_index",
+    "raw_index",
+)
 
 
 class InputManifestError(ValueError):
@@ -62,6 +71,18 @@ class InputManifest:
         return tuple(frame.path for frame in self.frames)
 
 
+@dataclass(frozen=True, slots=True)
+class _StableFileSnapshot:
+    path: Path
+    device: int
+    inode: int
+    mode: int
+    link_count: int
+    size_bytes: int
+    mtime_ns: int
+    sha256: str
+
+
 def _plain_int(value: Any, *, name: str) -> int:
     if type(value) is not int:
         raise InputManifestError(f"{name} must be an integer")
@@ -90,8 +111,27 @@ def _load_json_object(path: Path, *, name: str) -> tuple[dict[str, Any], bytes]:
         payload_bytes = path.read_bytes()
     except OSError as error:
         raise InputManifestError(f"cannot read {name} {path}: {error}") from error
+    def reject_constant(value: str) -> None:
+        raise InputManifestError(
+            f"{name} contains non-finite JSON constant {value!r}: {path}"
+        )
+
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise InputManifestError(
+                    f"{name} contains duplicate JSON key {key!r}: {path}"
+                )
+            result[key] = value
+        return result
+
     try:
-        payload = json.loads(payload_bytes.decode("utf-8"))
+        payload = json.loads(
+            payload_bytes.decode("utf-8"),
+            parse_constant=reject_constant,
+            object_pairs_hook=reject_duplicates,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise InputManifestError(f"{name} is not valid UTF-8 JSON: {path}") from error
     if not isinstance(payload, dict):
@@ -99,8 +139,75 @@ def _load_json_object(path: Path, *, name: str) -> tuple[dict[str, Any], bytes]:
     return payload, payload_bytes
 
 
+def _stable_file_snapshot(path: Path, *, name: str) -> _StableFileSnapshot:
+    """Hash one regular non-symlink file through one descriptor."""
+
+    try:
+        link_metadata = os.lstat(path)
+    except OSError as error:
+        raise InputManifestError(f"cannot inspect {name}: {path}: {error}") from error
+    if stat.S_ISLNK(link_metadata.st_mode) or not stat.S_ISREG(link_metadata.st_mode):
+        raise InputManifestError(
+            f"{name} must be a regular non-symlink file: {path}"
+        )
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise InputManifestError(f"cannot open {name}: {path}: {error}") from error
+    try:
+        before = os.fstat(descriptor)
+        if (
+            (link_metadata.st_dev, link_metadata.st_ino)
+            != (before.st_dev, before.st_ino)
+            or not stat.S_ISREG(before.st_mode)
+        ):
+            raise InputManifestError(f"{name} changed between lstat and open: {path}")
+        digest = hashlib.sha256()
+        size_read = 0
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            size_read += len(chunk)
+        after = os.fstat(descriptor)
+    except OSError as error:
+        raise InputManifestError(f"cannot hash {name}: {path}: {error}") from error
+    finally:
+        os.close(descriptor)
+    identity_before = (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+        before.st_nlink,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    identity_after = (
+        after.st_dev,
+        after.st_ino,
+        after.st_mode,
+        after.st_nlink,
+        after.st_size,
+        after.st_mtime_ns,
+    )
+    if identity_before != identity_after or size_read != before.st_size:
+        raise InputManifestError(f"{name} changed while being hashed: {path}")
+    return _StableFileSnapshot(
+        path=path,
+        device=before.st_dev,
+        inode=before.st_ino,
+        mode=stat.S_IMODE(before.st_mode),
+        link_count=before.st_nlink,
+        size_bytes=before.st_size,
+        mtime_ns=before.st_mtime_ns,
+        sha256=digest.hexdigest(),
+    )
+
+
 def _source_frames(
-    payload: Mapping[str, Any], *, base_dir: Path
+    payload: Mapping[str, Any], *, base_dir: Path, reject_aliases: bool = False
 ) -> list[tuple[Path, dict[str, Any]]]:
     if "frames" in payload and "frame_paths" in payload:
         raise InputManifestError(
@@ -128,15 +235,19 @@ def _source_frames(
                 f"source frame {index} must be a path or an object"
             )
         path_text = _nonempty_path(raw_path, name=f"source frame {index} path")
-        path = Path(path_text)
-        if not path.is_absolute():
-            path = base_dir / path
+        raw_path = Path(path_text)
+        unresolved = raw_path if raw_path.is_absolute() else base_dir / raw_path
+        absolute = Path(os.path.abspath(unresolved))
         try:
-            path = path.resolve(strict=True)
+            path = unresolved.resolve(strict=True)
         except OSError as error:
             raise InputManifestError(
-                f"source frame {index} path does not exist: {path}"
+                f"source frame {index} path does not exist: {unresolved}"
             ) from error
+        if reject_aliases and path != absolute:
+            raise InputManifestError(
+                f"source frame {index} path may not resolve through a symlink or alias"
+            )
         if not path.is_file():
             raise InputManifestError(
                 f"source frame {index} path is not a file: {path}"
@@ -145,13 +256,439 @@ def _source_frames(
     return result
 
 
-def _corruption_types(
-    payload: Mapping[str, Any], *, frame_count: int
-) -> list[str | None]:
+def _source_output_frame_count(
+    payload: Mapping[str, Any], *, source_frame_count: int
+) -> tuple[int, bool]:
+    if "output_frame_count" not in payload:
+        return source_frame_count, False
+    frame_count = _plain_int(
+        payload["output_frame_count"], name="source output_frame_count"
+    )
+    if frame_count < 1 or frame_count > source_frame_count:
+        raise InputManifestError(
+            "source output_frame_count must be between 1 and source frame count "
+            f"({source_frame_count})"
+        )
+    return frame_count, True
+
+
+def _source_pool_frame_identity(
+    path: Path, metadata: Mapping[str, Any], *, frame_index: int
+) -> dict[str, Any]:
+    snapshot = _stable_file_snapshot(path, name=f"source frame {frame_index}")
+    actual_content_sha256 = snapshot.sha256
+    content_sha256 = {actual_content_sha256}
+    for key in SOURCE_CONTENT_SHA256_KEYS:
+        if key not in metadata:
+            continue
+        value = metadata[key]
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdefABCDEF" for character in value)
+        ):
+            raise InputManifestError(
+                f"source frame {frame_index} metadata {key} must be a SHA-256"
+            )
+        declared = value.lower()
+        if declared != actual_content_sha256:
+            raise InputManifestError(
+                f"source frame {frame_index} metadata {key} does not match actual "
+                "file SHA-256"
+            )
+        content_sha256.add(declared)
+
+    raw_indices: set[int] = set()
+    for key in SOURCE_RAW_INDEX_KEYS:
+        if key not in metadata:
+            continue
+        raw_indices.add(
+            _plain_int(
+                metadata[key], name=f"source frame {frame_index} metadata {key}"
+            )
+        )
+    if len(raw_indices) > 1:
+        raise InputManifestError(
+            f"source frame {frame_index} metadata raw-index fields must agree"
+        )
+    return {
+        "resolved_path": str(path),
+        "inode": (snapshot.device, snapshot.inode),
+        "content_sha256": content_sha256,
+        "raw_index": next(iter(raw_indices), None),
+        "snapshot": snapshot,
+    }
+
+
+def _validate_source_pool_disjoint(
+    source_frames: Sequence[tuple[Path, Mapping[str, Any]]],
+    *,
+    output_frame_count: int,
+) -> None:
+    identities = [
+        _source_pool_frame_identity(path, metadata, frame_index=frame_index)
+        for frame_index, (path, metadata) in enumerate(source_frames)
+    ]
+    for donor_index in range(output_frame_count, len(source_frames)):
+        donor = identities[donor_index]
+        for base_index in range(output_frame_count):
+            base = identities[base_index]
+            reasons: list[str] = []
+            if donor["resolved_path"] == base["resolved_path"]:
+                reasons.append("resolved path")
+            if donor["inode"] == base["inode"]:
+                reasons.append("inode")
+            if donor["content_sha256"] & base["content_sha256"]:
+                reasons.append("content SHA-256")
+            if (
+                donor["raw_index"] is not None
+                and donor["raw_index"] == base["raw_index"]
+            ):
+                reasons.append("raw index")
+            if reasons:
+                raise InputManifestError(
+                    f"source-pool donor frame {donor_index} overlaps output/base "
+                    f"frame {base_index} by {', '.join(reasons)}"
+                )
+
+
+def _validate_declared_source_hashes(
+    source_frames: Sequence[tuple[Path, Mapping[str, Any]]],
+) -> None:
+    for frame_index, (path, metadata) in enumerate(source_frames):
+        if any(key in metadata for key in SOURCE_CONTENT_SHA256_KEYS):
+            _source_pool_frame_identity(path, metadata, frame_index=frame_index)
+
+
+_FORMAL_SNAPSHOT_KEYS = {
+    "path",
+    "sha256",
+    "size_bytes",
+    "mode_octal",
+    "link_count",
+    "device",
+    "inode",
+    "mtime_ns",
+}
+
+
+def _formal_read_only_directory(path: Path, *, name: str) -> Path:
+    absolute = Path(os.path.abspath(path))
+    try:
+        metadata = os.lstat(absolute)
+    except OSError as error:
+        raise InputManifestError(f"cannot inspect {name}: {absolute}: {error}") from error
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise InputManifestError(f"{name} must be a real non-symlink directory")
+    if stat.S_IMODE(metadata.st_mode) & 0o222:
+        raise InputManifestError(f"{name} must be read-only (no write bits)")
+    try:
+        resolved = absolute.resolve(strict=True)
+    except OSError as error:
+        raise InputManifestError(f"cannot resolve {name}: {absolute}") from error
+    if resolved != absolute:
+        raise InputManifestError(f"{name} may not resolve through a symlink")
+    return resolved
+
+
+def _formal_path(
+    value: Any,
+    *,
+    base_dir: Path,
+    name: str,
+    expected_root: Path | None = None,
+) -> Path:
+    path_text = _nonempty_path(value, name=name)
+    raw = Path(path_text)
+    unresolved = raw if raw.is_absolute() else base_dir / raw
+    absolute = Path(os.path.abspath(unresolved))
+    try:
+        resolved = unresolved.resolve(strict=True)
+    except OSError as error:
+        raise InputManifestError(f"{name} does not exist: {unresolved}") from error
+    if resolved != absolute:
+        raise InputManifestError(f"{name} may not resolve through a symlink or alias")
+    if expected_root is not None:
+        try:
+            resolved.relative_to(expected_root)
+        except ValueError as error:
+            raise InputManifestError(f"{name} resolves outside the formal dataset root") from error
+    return resolved
+
+
+def _formal_sha256(value: Any, *, name: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise InputManifestError(f"{name} must be a lowercase SHA-256")
+    return value
+
+
+def _formal_nonnegative_int(value: Any, *, name: str) -> int:
+    result = _plain_int(value, name=name)
+    if result < 0:
+        raise InputManifestError(f"{name} must be non-negative")
+    return result
+
+
+def _assert_formal_snapshot(
+    snapshot: _StableFileSnapshot,
+    declared: Mapping[str, Any],
+    *,
+    name: str,
+    prefix: str = "",
+) -> None:
+    expected = {
+        "sha256": _formal_sha256(
+            declared.get(f"{prefix}sha256"), name=f"{name} sha256"
+        ),
+        "size_bytes": _formal_nonnegative_int(
+            declared.get(f"{prefix}size_bytes"), name=f"{name} size_bytes"
+        ),
+        "mode_octal": declared.get(f"{prefix}mode_octal"),
+        "link_count": _formal_nonnegative_int(
+            declared.get(f"{prefix}link_count"), name=f"{name} link_count"
+        ),
+        "device": _formal_nonnegative_int(
+            declared.get(f"{prefix}device"), name=f"{name} device"
+        ),
+        "inode": _formal_nonnegative_int(
+            declared.get(f"{prefix}inode"), name=f"{name} inode"
+        ),
+        "mtime_ns": _formal_nonnegative_int(
+            declared.get(f"{prefix}mtime_ns"), name=f"{name} mtime_ns"
+        ),
+    }
+    if not isinstance(expected["mode_octal"], str):
+        raise InputManifestError(f"{name} mode_octal must be an octal string")
+    actual = {
+        "sha256": snapshot.sha256,
+        "size_bytes": snapshot.size_bytes,
+        "mode_octal": f"{snapshot.mode:04o}",
+        "link_count": snapshot.link_count,
+        "device": snapshot.device,
+        "inode": snapshot.inode,
+        "mtime_ns": snapshot.mtime_ns,
+    }
+    if expected != actual:
+        raise InputManifestError(
+            f"{name} actual path/stat/SHA-256 differs from formal declaration"
+        )
+    if snapshot.mode & 0o222:
+        raise InputManifestError(f"{name} must remain read-only")
+
+
+def _validate_formal_artifact(
+    value: Any, *, base_dir: Path, name: str
+) -> tuple[Path, _StableFileSnapshot]:
+    if not isinstance(value, Mapping) or set(value) != _FORMAL_SNAPSHOT_KEYS:
+        raise InputManifestError(f"{name} has invalid formal artifact fields")
+    path = _formal_path(value.get("path"), base_dir=base_dir, name=f"{name} path")
+    snapshot = _stable_file_snapshot(path, name=name)
+    _assert_formal_snapshot(snapshot, value, name=name)
+    return path, snapshot
+
+
+def _validate_formal_source_provenance(
+    source_payload: Mapping[str, Any],
+    source_frames: Sequence[tuple[Path, Mapping[str, Any]]],
+    *,
+    source_manifest_path: Path,
+    input_payload: Mapping[str, Any],
+) -> None:
+    if source_payload.get("dataset") != "rgbd_dataset_freiburg1_desk":
+        raise InputManifestError("formal source dataset identity mismatch")
+    if (
+        source_payload.get("file_path_semantics")
+        != "relative_to_this_manifest_directory"
+    ):
+        raise InputManifestError("formal source file_path_semantics mismatch")
+    if source_payload.get("source_is_read_only") is not True:
+        raise InputManifestError("formal source manifest must mark source_is_read_only=true")
+    lineage = source_payload.get("official_lineage")
+    if not isinstance(lineage, Mapping) or set(lineage) != {
+        "dataset_root",
+        "archive",
+        "raw_manifest",
+        "raw_manifest_schema_version",
+    }:
+        raise InputManifestError("formal source manifest official_lineage is invalid")
+    if lineage.get("raw_manifest_schema_version") != FORMAL_RAW_MANIFEST_SCHEMA_VERSION:
+        raise InputManifestError("formal raw-manifest schema lineage mismatch")
+    dataset_root_text = _nonempty_path(
+        lineage.get("dataset_root"), name="formal lineage dataset_root"
+    )
+    if not Path(dataset_root_text).is_absolute():
+        raise InputManifestError("formal lineage dataset_root must be absolute")
+    dataset_root = _formal_read_only_directory(
+        Path(dataset_root_text), name="formal dataset root"
+    )
+    rgb_root = _formal_read_only_directory(dataset_root / "rgb", name="formal RGB root")
+    depth_root = _formal_read_only_directory(
+        dataset_root / "depth", name="formal depth root"
+    )
+    _validate_formal_artifact(
+        lineage.get("archive"), base_dir=source_manifest_path.parent, name="formal archive"
+    )
+    _validate_formal_artifact(
+        lineage.get("raw_manifest"),
+        base_dir=source_manifest_path.parent,
+        name="formal raw manifest",
+    )
+
+    raw_indices: set[int] = set()
+    depth_indices: set[int] = set()
+    groundtruth_indices: set[int] = set()
+    for frame_index, (rgb_path, metadata) in enumerate(source_frames):
+        try:
+            rgb_path.relative_to(rgb_root)
+        except ValueError as error:
+            raise InputManifestError(
+                f"formal source frame {frame_index} is outside the RGB root"
+            ) from error
+        if metadata.get("source_pool_index") != frame_index:
+            raise InputManifestError(
+                f"formal source frame {frame_index} source_pool_index mismatch"
+            )
+        expected_role = (
+            "base"
+            if frame_index < int(source_payload.get("output_frame_count", -1))
+            else "low_overlap_donor"
+        )
+        if metadata.get("source_pool_role") != expected_role:
+            raise InputManifestError(
+                f"formal source frame {frame_index} source_pool_role mismatch"
+            )
+        raw_index = _formal_nonnegative_int(
+            metadata.get("raw_rgb_source_index"),
+            name=f"formal source frame {frame_index} raw RGB index",
+        )
+        if metadata.get("source_entry_index") != raw_index:
+            raise InputManifestError(
+                f"formal source frame {frame_index} RGB entry aliases disagree"
+            )
+        if raw_index in raw_indices:
+            raise InputManifestError("formal source pool contains duplicate raw RGB indices")
+        raw_indices.add(raw_index)
+        rgb_snapshot = _stable_file_snapshot(
+            rgb_path, name=f"formal source RGB frame {frame_index}"
+        )
+        _assert_formal_snapshot(
+            rgb_snapshot,
+            metadata,
+            name=f"formal source RGB frame {frame_index}",
+            prefix="rgb_",
+        )
+
+        depth = metadata.get("depth")
+        if not isinstance(depth, Mapping):
+            raise InputManifestError(f"formal source frame {frame_index} lacks depth provenance")
+        depth_path = _formal_path(
+            depth.get("path"),
+            base_dir=source_manifest_path.parent,
+            name=f"formal source frame {frame_index} depth path",
+            expected_root=dataset_root,
+        )
+        try:
+            depth_path.relative_to(depth_root)
+        except ValueError as error:
+            raise InputManifestError(
+                f"formal source frame {frame_index} depth is outside the depth root"
+            ) from error
+        depth_snapshot = _stable_file_snapshot(
+            depth_path, name=f"formal source depth frame {frame_index}"
+        )
+        _assert_formal_snapshot(
+            depth_snapshot, depth, name=f"formal source depth frame {frame_index}"
+        )
+        depth_index = _formal_nonnegative_int(
+            depth.get("source_entry_index"),
+            name=f"formal source frame {frame_index} depth source index",
+        )
+        if depth_index in depth_indices:
+            raise InputManifestError("formal source pool contains duplicate depth associations")
+        depth_indices.add(depth_index)
+
+        groundtruth = metadata.get("groundtruth")
+        if not isinstance(groundtruth, Mapping):
+            raise InputManifestError(
+                f"formal source frame {frame_index} lacks ground-truth provenance"
+            )
+        groundtruth_index = _formal_nonnegative_int(
+            groundtruth.get("source_entry_index"),
+            name=f"formal source frame {frame_index} ground-truth source index",
+        )
+        if groundtruth_index in groundtruth_indices:
+            raise InputManifestError(
+                "formal source pool contains duplicate ground-truth associations"
+            )
+        groundtruth_indices.add(groundtruth_index)
+
+    index_files = source_payload.get("tum_index_files")
+    if not isinstance(index_files, Mapping) or set(index_files) != {
+        "rgb",
+        "depth",
+        "groundtruth",
+    }:
+        raise InputManifestError("formal source tum_index_files is invalid")
+    index_snapshots: dict[str, tuple[Path, _StableFileSnapshot]] = {}
+    for kind in ("rgb", "depth", "groundtruth"):
+        declaration = index_files[kind]
+        if not isinstance(declaration, Mapping) or set(declaration) != (
+            _FORMAL_SNAPSHOT_KEYS | {"data_entry_count"}
+        ):
+            raise InputManifestError(f"formal {kind} index declaration is invalid")
+        if _formal_nonnegative_int(
+            declaration.get("data_entry_count"),
+            name=f"formal {kind} index data_entry_count",
+        ) < 1:
+            raise InputManifestError(f"formal {kind} index must contain data entries")
+        index_path = _formal_path(
+            declaration.get("path"),
+            base_dir=source_manifest_path.parent,
+            name=f"formal {kind} index path",
+            expected_root=dataset_root,
+        )
+        if index_path != dataset_root / f"{kind}.txt":
+            raise InputManifestError(f"formal {kind} index path is not canonical")
+        snapshot = _stable_file_snapshot(index_path, name=f"formal {kind} index")
+        _assert_formal_snapshot(snapshot, declaration, name=f"formal {kind} index")
+        index_snapshots[kind] = (index_path, snapshot)
+
+    ground_truth_text = _nonempty_path(
+        source_payload.get("ground_truth_path"), name="formal ground_truth_path"
+    )
+    ground_truth_path = _formal_path(
+        ground_truth_text,
+        base_dir=source_manifest_path.parent,
+        name="formal ground_truth_path",
+        expected_root=dataset_root,
+    )
+    groundtruth_index_path, groundtruth_snapshot = index_snapshots["groundtruth"]
+    if ground_truth_path != groundtruth_index_path:
+        raise InputManifestError("formal ground_truth_path differs from groundtruth index")
+    if input_payload.get("source_ground_truth_path") != ground_truth_text:
+        raise InputManifestError("input/source ground_truth_path declarations differ")
+    if input_payload.get("source_ground_truth_resolved_path") != str(ground_truth_path):
+        raise InputManifestError("source_ground_truth_resolved_path mismatch")
+    if input_payload.get("source_ground_truth_sha256") != groundtruth_snapshot.sha256:
+        raise InputManifestError("source_ground_truth_sha256 no longer matches")
+
+
+def _corruption_expectations(
+    payload: Mapping[str, Any],
+    *,
+    frame_count: int,
+    source_frame_count: int,
+    donor_pool_start: int | None,
+) -> tuple[list[str | None], list[int | None]]:
     raw_corruptions = payload.get("corruptions")
     if not isinstance(raw_corruptions, list) or not raw_corruptions:
         raise InputManifestError("corruptions must be a non-empty JSON array")
     expected: list[str | None] = [None] * frame_count
+    expected_replacements: list[int | None] = [None] * frame_count
     for index, raw in enumerate(raw_corruptions):
         if not isinstance(raw, Mapping):
             raise InputManifestError(f"corruption {index} must be a JSON object")
@@ -159,6 +696,16 @@ def _corruption_types(
         if corruption_type not in CORRUPTION_TO_TRANSFORM:
             raise InputManifestError(
                 f"corruption {index} has unsupported type {corruption_type!r}"
+            )
+        start = _plain_int(raw.get("start"), name=f"corruption {index} start")
+        end = _plain_int(raw.get("end"), name=f"corruption {index} end")
+        if raw.get("start_frame") != start or raw.get("end_frame") != end:
+            raise InputManifestError(
+                f"corruption {index} frame aliases must agree with start/end"
+            )
+        if start < 0 or end < start or end >= frame_count:
+            raise InputManifestError(
+                f"corruption {index} has invalid inclusive interval [{start}, {end}]"
             )
         if corruption_type == "dynamic_occlusion":
             parameters = raw.get("parameters")
@@ -178,23 +725,132 @@ def _corruption_types(
                     f"corruption {index} dynamic_occlusion has unsupported "
                     "coordinate reference"
                 )
-        start = _plain_int(raw.get("start"), name=f"corruption {index} start")
-        end = _plain_int(raw.get("end"), name=f"corruption {index} end")
-        if raw.get("start_frame") != start or raw.get("end_frame") != end:
-            raise InputManifestError(
-                f"corruption {index} frame aliases must agree with start/end"
+        elif corruption_type == "low_overlap_jump":
+            parameters = raw.get("parameters")
+            required = {"source_start", "source_end", "source_indices", "selection"}
+            if not isinstance(parameters, Mapping) or set(parameters) != required:
+                raise InputManifestError(
+                    f"corruption {index} low_overlap_jump parameters have "
+                    "unexpected fields"
+                )
+            source_start = _plain_int(
+                parameters.get("source_start"),
+                name=f"corruption {index} source_start",
             )
-        if start < 0 or end < start or end >= frame_count:
-            raise InputManifestError(
-                f"corruption {index} has invalid inclusive interval [{start}, {end}]"
+            source_end = _plain_int(
+                parameters.get("source_end"), name=f"corruption {index} source_end"
             )
+            raw_source_indices = parameters.get("source_indices")
+            if not isinstance(raw_source_indices, list):
+                raise InputManifestError(
+                    f"corruption {index} source_indices must be a list"
+                )
+            source_indices = [
+                _plain_int(
+                    source_index,
+                    name=f"corruption {index} source_indices[{offset}]",
+                )
+                for offset, source_index in enumerate(raw_source_indices)
+            ]
+            if (
+                source_start < 0
+                or source_end < source_start
+                or source_end >= source_frame_count
+            ):
+                raise InputManifestError(
+                    f"corruption {index} low-overlap donor range is out of bounds"
+                )
+            interval_length = end - start + 1
+            if source_end - source_start + 1 != interval_length:
+                raise InputManifestError(
+                    f"corruption {index} low-overlap donor length disagrees "
+                    "with interval"
+                )
+            expected_indices = list(range(source_start, source_end + 1))
+            if source_indices != expected_indices:
+                raise InputManifestError(
+                    f"corruption {index} low-overlap source range and indices disagree"
+                )
+            if donor_pool_start is not None and source_start < donor_pool_start:
+                raise InputManifestError(
+                    f"corruption {index} low-overlap donor range is outside the "
+                    "declared donor pool"
+                )
+            if not set(range(start, end + 1)).isdisjoint(source_indices):
+                raise InputManifestError(
+                    f"corruption {index} low-overlap donor and target ranges overlap"
+                )
+            if parameters.get("selection") not in {
+                "explicit",
+                "seeded_farthest_disjoint_index_proxy",
+            }:
+                raise InputManifestError(
+                    f"corruption {index} low-overlap selection is unsupported"
+                )
+            for target_index, source_index in zip(
+                range(start, end + 1), source_indices, strict=True
+            ):
+                expected_replacements[target_index] = source_index
+        elif corruption_type == "wrong_order_segment":
+            parameters = raw.get("parameters")
+            required = {"mode", "permutation", "relative_permutation"}
+            if not isinstance(parameters, Mapping) or set(parameters) != required:
+                raise InputManifestError(
+                    f"corruption {index} wrong_order_segment parameters have "
+                    "unexpected fields"
+                )
+            if parameters.get("mode") not in {"reverse", "shuffle"}:
+                raise InputManifestError(
+                    f"corruption {index} wrong_order_segment mode is unsupported"
+                )
+            raw_permutation = parameters.get("permutation")
+            raw_relative = parameters.get("relative_permutation")
+            if not isinstance(raw_permutation, list) or not isinstance(
+                raw_relative, list
+            ):
+                raise InputManifestError(
+                    f"corruption {index} wrong-order permutations must be lists"
+                )
+            permutation = [
+                _plain_int(
+                    source_index,
+                    name=f"corruption {index} permutation[{offset}]",
+                )
+                for offset, source_index in enumerate(raw_permutation)
+            ]
+            relative = [
+                _plain_int(
+                    source_index,
+                    name=f"corruption {index} relative_permutation[{offset}]",
+                )
+                for offset, source_index in enumerate(raw_relative)
+            ]
+            original = list(range(start, end + 1))
+            if sorted(permutation) != original or len(permutation) != len(original):
+                raise InputManifestError(
+                    f"corruption {index} wrong-order permutation is invalid"
+                )
+            if relative != [source_index - start for source_index in permutation]:
+                raise InputManifestError(
+                    f"corruption {index} wrong-order relative permutation disagrees"
+                )
+            if parameters.get("mode") == "reverse" and permutation != list(
+                reversed(original)
+            ):
+                raise InputManifestError(
+                    f"corruption {index} reverse permutation is not reversed"
+                )
+            for target_index, source_index in zip(
+                original, permutation, strict=True
+            ):
+                expected_replacements[target_index] = source_index
         for frame_index in range(start, end + 1):
             if expected[frame_index] is not None:
                 raise InputManifestError(
                     f"corruption intervals overlap at frame {frame_index}"
                 )
             expected[frame_index] = corruption_type
-    return expected
+    return expected, expected_replacements
 
 
 def _rectangle(value: Any, *, name: str) -> dict[str, float]:
@@ -375,14 +1031,47 @@ def load_input_manifest(path: str | os.PathLike[str]) -> InputManifest:
     if actual_sha256 != expected_sha256:
         raise InputManifestError("source manifest SHA-256 no longer matches")
 
+    is_formal_source = (
+        source_payload.get("schema_version") == FORMAL_SOURCE_SCHEMA_VERSION
+    )
     source_frames = _source_frames(
-        source_payload, base_dir=source_manifest_path.parent
+        source_payload,
+        base_dir=source_manifest_path.parent,
+        reject_aliases=is_formal_source,
     )
     if len(source_frames) != source_frame_count:
         raise InputManifestError(
             "source_frame_count does not match source manifest frame count"
         )
-    expected_corruptions = _corruption_types(payload, frame_count=frame_count)
+    source_output_frame_count, has_declared_source_pool = _source_output_frame_count(
+        source_payload, source_frame_count=source_frame_count
+    )
+    if frame_count != source_output_frame_count:
+        raise InputManifestError(
+            "frame_count does not match source output_frame_count "
+            f"({source_output_frame_count})"
+        )
+    if is_formal_source:
+        _validate_formal_source_provenance(
+            source_payload,
+            source_frames,
+            source_manifest_path=source_manifest_path,
+            input_payload=payload,
+        )
+    if has_declared_source_pool:
+        _validate_source_pool_disjoint(
+            source_frames, output_frame_count=source_output_frame_count
+        )
+    else:
+        _validate_declared_source_hashes(source_frames)
+    expected_corruptions, expected_replacements = _corruption_expectations(
+        payload,
+        frame_count=frame_count,
+        source_frame_count=source_frame_count,
+        donor_pool_start=(
+            source_output_frame_count if has_declared_source_pool else None
+        ),
+    )
 
     frames: list[ManifestFrame] = []
     for position, raw_frame in enumerate(raw_frames):
@@ -451,9 +1140,15 @@ def load_input_manifest(path: str | os.PathLike[str]) -> InputManifest:
             raise InputManifestError(
                 f"frame {position} transforms do not match corruption labels"
             )
-        if expected_transform is None and source_index != frame_index:
+        expected_replacement = expected_replacements[position]
+        if expected_replacement is not None and source_index != expected_replacement:
             raise InputManifestError(
-                f"clean frame {position} must retain its source_index"
+                f"frame {position} replacement provenance disagrees with "
+                "corruption label"
+            )
+        if expected_replacement is None and source_index != frame_index:
+            raise InputManifestError(
+                f"non-replacement frame {position} must retain its source_index"
             )
         frames.append(
             ManifestFrame(

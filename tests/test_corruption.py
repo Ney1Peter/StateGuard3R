@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -184,6 +185,176 @@ def test_fixed_seed_makes_generated_parameters_and_shuffle_reproducible() -> Non
     assert dynamic_parameters["rectangle_generated_from_seed"] is True
     assert dynamic_parameters["velocity_generated_from_seed"] is True
     assert len(dynamic_parameters["frame_rectangles"]) == 3
+
+
+def test_output_frame_count_keeps_full_source_pool_available_for_donors(
+    tmp_path: Path,
+) -> None:
+    source_path, source, frame_paths = _make_source_manifest(tmp_path, frame_count=35)
+    source["output_frame_count"] = 30
+    source_path.write_text(json.dumps(source, indent=2) + "\n", encoding="utf-8")
+    for path in [source_path, *frame_paths]:
+        path.chmod(0o444)
+    source_before = (source_path.read_bytes(), source_path.stat().st_mtime_ns)
+    frames_before = _file_state(frame_paths)
+    output_path = tmp_path / "corrupted.json"
+
+    result = generate_corruption_manifest(
+        source_path,
+        output_path,
+        [
+            {
+                "type": "low_overlap_jump",
+                "start": 15,
+                "end": 19,
+                "parameters": {"source_start": 30},
+            }
+        ],
+        check_paths=True,
+    )
+
+    assert result["source_frame_count"] == 35
+    assert result["frame_count"] == 30
+    assert len(result["frames"]) == 30
+    assert [
+        result["frames"][index]["source_index"] for index in range(15, 20)
+    ] == list(range(30, 35))
+    assert result["source_manifest_sha256"] == hashlib.sha256(
+        source_before[0]
+    ).hexdigest()
+    assert (source_path.read_bytes(), source_path.stat().st_mtime_ns) == source_before
+    assert _file_state(frame_paths) == frames_before
+
+
+@pytest.mark.parametrize(
+    "output_frame_count", [True, False, 0, 36, 30.0, "30", None]
+)
+def test_invalid_output_frame_count_is_rejected(output_frame_count: object) -> None:
+    source = {
+        "sequence": "source-pool-validation",
+        "frame_paths": [f"frame-{index}.png" for index in range(35)],
+        "output_frame_count": output_frame_count,
+    }
+
+    with pytest.raises(CorruptionManifestError, match="output_frame_count"):
+        build_corruption_manifest(
+            source,
+            [{"type": "dynamic_occlusion", "start": 0, "end": 0}],
+        )
+
+
+def test_declared_source_pool_limits_targets_and_explicit_donors() -> None:
+    source = {
+        "sequence": "partition-validation",
+        "frame_paths": [f"frame-{index}.png" for index in range(5)],
+        "output_frame_count": 3,
+    }
+
+    with pytest.raises(CorruptionManifestError, match="invalid inclusive range"):
+        build_corruption_manifest(
+            source,
+            [{"type": "dynamic_occlusion", "start": 3, "end": 3}],
+        )
+    with pytest.raises(CorruptionManifestError, match="declared donor pool"):
+        build_corruption_manifest(
+            source,
+            [
+                {
+                    "type": "low_overlap_jump",
+                    "start": 0,
+                    "end": 0,
+                    "parameters": {"source_start": 2},
+                }
+            ],
+        )
+
+
+def test_declared_source_pool_auto_selection_uses_only_donor_tail() -> None:
+    source = {
+        "sequence": "automatic-donor-selection",
+        "frame_paths": [f"frame-{index}.png" for index in range(5)],
+        "output_frame_count": 3,
+    }
+
+    result = build_corruption_manifest(
+        source,
+        [{"type": "low_overlap_jump", "start": 0, "end": 1}],
+    )
+
+    assert result["corruptions"][0]["parameters"]["source_indices"] == [3, 4]
+    assert [result["frames"][index]["source_index"] for index in range(2)] == [
+        3,
+        4,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("overlap_kind", "message"),
+    [
+        ("resolved_path", "resolved path"),
+        ("inode", "inode"),
+        ("content_sha256", "content SHA-256"),
+        ("raw_index", "raw index"),
+    ],
+)
+def test_declared_source_pool_rejects_base_donor_identity_overlap(
+    tmp_path: Path, overlap_kind: str, message: str
+) -> None:
+    _, source, frame_paths = _make_source_manifest(tmp_path, frame_count=3)
+    source["output_frame_count"] = 2
+    frames = source["frames"]
+    assert isinstance(frames, list)
+    assert isinstance(frames[0], dict)
+    assert isinstance(frames[2], dict)
+
+    if overlap_kind == "resolved_path":
+        frames[2]["path"] = frames[0]["path"]
+    elif overlap_kind == "inode":
+        frame_paths[2].unlink()
+        os.link(frame_paths[0], frame_paths[2])
+    elif overlap_kind == "content_sha256":
+        frame_paths[2].write_bytes(frame_paths[0].read_bytes())
+    else:
+        frames[0]["raw_rgb_source_index"] = 17
+        frames[2]["raw_rgb_source_index"] = 17
+
+    with pytest.raises(CorruptionManifestError, match=message):
+        build_corruption_manifest(
+            source,
+            [{"type": "dynamic_occlusion", "start": 0, "end": 0}],
+            source_base_dir=tmp_path,
+            check_paths=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "metadata_key", ["rgb_sha256", "content_sha256", "sha256"]
+)
+def test_declared_source_content_hash_must_match_readable_file(
+    tmp_path: Path, metadata_key: str
+) -> None:
+    _, source, frame_paths = _make_source_manifest(tmp_path, frame_count=3)
+    frames = source["frames"]
+    assert isinstance(frames, list)
+    assert isinstance(frames[0], dict)
+    frames[0][metadata_key] = "0" * 64
+
+    with pytest.raises(CorruptionManifestError, match="actual file SHA-256"):
+        build_corruption_manifest(
+            source,
+            [{"type": "dynamic_occlusion", "start": 0, "end": 0}],
+            source_base_dir=tmp_path,
+            check_paths=True,
+        )
+
+    frames[0][metadata_key] = hashlib.sha256(frame_paths[0].read_bytes()).hexdigest()
+    result = build_corruption_manifest(
+        source,
+        [{"type": "dynamic_occlusion", "start": 0, "end": 0}],
+        source_base_dir=tmp_path,
+        check_paths=True,
+    )
+    assert result["frame_count"] == 3
 
 
 def test_generate_and_cli_leave_source_manifest_and_frames_unchanged(
