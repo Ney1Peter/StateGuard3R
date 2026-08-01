@@ -346,9 +346,13 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
       符合协议，输入 tensor 和 Chateau 源文件未变，且 CUDA 未初始化。两图 fixture
       只能证明路由与像素执行，不能证明真实 corruption 强度、模型响应或科研指标。
 - [x] 已限制数据范围：截至 2026-08-01 没有下载数据集，也没有启动 GPU 任务。
-- [ ] 官方 512 DPT checkpoint 尚未取得；三个官方 Google 下载入口仍超时，且没有
-      使用第三方镜像或留下 partial 文件。
-- [ ] 真实两图 forward 尚未启动；八张 L20 均有既有进程，没有符合规则的空闲卡。
+- [x] 用户已从官方 README 的 Google Drive 入口取得 512 DPT checkpoint；静态审计
+      记录了 3,173,761,006-byte 大小和首次 SHA-256 `45f7e98a…f8103`，文件已设为只读，
+      且没有 partial。官方未发布 checksum，因此 runner 仍须在反序列化前后复核哈希。
+- [x] Gate 0 GPU 门禁已恢复：GPU 4/3 连续快照均约有 45.6 GiB 空闲、无 compute PID；
+      用户另行允许使用显存充足的非完全空闲卡，但不得停止或干扰既有进程。实际启动前
+      仍须紧邻复查并显式绑定单卡。
+- [ ] 真实两图 checkpoint load、CUDA kernel、forward 和一次 calibrated update 尚未执行。
 - [ ] 真实 clean/corruption Health Ledger、formal holdout 指标和科研 Go/No-Go
       尚无证据，因此 TUM 下载、quarantine 和 rollback 继续禁入。
 

@@ -188,6 +188,35 @@ existing root-owned Open WebUI service, so it was neither idle nor available
 to this task. No process was stopped or modified, and no CUDA context was
 started. The two external gates must both be rechecked before any later launch.
 
+### SETUP-0011: User-supplied official checkpoint and renewed GPU gate
+
+- Time: 2026-08-01 17:19–17:25 CST
+- Source declared by the user: the official ReCal3R README Google Drive link,
+  file ID `1Asz-ZB3FfpzZYwunhQvNPZEUA8XUNAYD`
+- Path: `/data/wangzheng/Project2/baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth`
+- Size: 3,173,761,006 bytes (about 2.96 GiB)
+- SHA-256: `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`
+- Owner: `wangzheng:wangzheng`; regular file; one hard link; not a symlink
+- Final mode: read-only `0444`
+- `/data` free space after upload: about 312 GiB (98% used)
+- Result: static checkpoint and GPU pre-launch gates passed; no deserialization
+  or CUDA work occurred in this setup step
+
+The uploaded file had a PyTorch-style ZIP header and 1,240 archive entries,
+contained no obvious HTML/error-page marker in its leading bytes, and had no
+adjacent `.part` or `.partial` file. Its size, mtime, and SHA-256 remained
+unchanged across the static audit and permission hardening. The official source
+does not publish a size or checksum, so this first local digest is an
+intra-project integrity baseline and does not independently authenticate the
+source. The runner must verify it again before and after deserialization.
+
+The user explicitly allowed a GPU with sufficient free memory even when it is
+not completely empty, provided existing processes are not stopped or
+interfered with. The task still prefers an empty card. Two snapshots seven
+seconds apart found GPU 4 and GPU 3 stable at 45,586 MiB free, 0% utilization,
+P8, and no compute PID. GPU 4 is the first choice and GPU 3 the fallback; the
+actual launch must repeat the check immediately before binding one card.
+
 ## Development pipeline records
 
 ### DEV-SYNTH-0001: Original synthetic CLI smoke
