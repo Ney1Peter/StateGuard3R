@@ -433,8 +433,12 @@ def test_output_pose_jump_uses_relative_rotation_angle() -> None:
     assert trajectory[1]["rotation_jump_rad"] == pytest.approx(np.pi / 2)
 
 
-def _named_head(name: str):
-    return type(name, (), {})()
+def _named_head(name: str, *, has_pose: bool = True, pose_decoder: bool = True):
+    head = type(name, (), {})()
+    head.has_pose = has_pose
+    if pose_decoder:
+        head.pose_head = object()
+    return head
 
 
 @pytest.mark.parametrize(
@@ -448,11 +452,10 @@ def test_loaded_model_interface_matches_checkpoint_contract(
     checkpoint_name: str, head_type: str
 ) -> None:
     model = SimpleNamespace(
-        config=SimpleNamespace(
-            head_type=head_type,
-            pose_head=True,
-            output_mode="pts3d+pose",
-        ),
+        config=SimpleNamespace(),
+        head_type=head_type,
+        pose_head_flag=True,
+        output_mode="pts3d+pose",
         downstream_head=_named_head(
             "LinearPts3dPose" if head_type == "linear" else "DPTPts3dPose"
         ),
@@ -460,26 +463,93 @@ def test_loaded_model_interface_matches_checkpoint_contract(
 
     assert _validate_model_interface(model, checkpoint_name) == {
         "head_type": head_type,
+        "head_type_source": "model.head_type",
         "downstream_head_class": (
             "LinearPts3dPose" if head_type == "linear" else "DPTPts3dPose"
         ),
+        "downstream_has_pose": True,
         "independent_cross_pointmap": True,
         "pose_head": True,
+        "pose_head_source": "model.pose_head_flag",
+        "pose_decoder_present": True,
         "output_mode": "pts3d+pose",
+        "output_mode_source": "model.output_mode",
     }
 
 
 def test_loaded_model_interface_rejects_renamed_or_incompatible_head() -> None:
     model = SimpleNamespace(
         config=SimpleNamespace(
-            head_type="linear",
+            head_type="dpt",
             pose_head=True,
             output_mode="pts3d+pose",
         ),
+        head_type="linear",
+        pose_head_flag=True,
+        output_mode="pts3d+pose",
         downstream_head=_named_head("LinearPts3dPose"),
     )
 
     with pytest.raises(RuntimeError, match="expected 'dpt'"):
+        _validate_model_interface(model, "cut3r_512_dpt_4_64.pth")
+
+
+def test_loaded_model_interface_rejects_missing_effective_model_fields() -> None:
+    model = SimpleNamespace(
+        config=SimpleNamespace(
+            head_type="dpt",
+            pose_head=True,
+            output_mode="pts3d+pose",
+        ),
+        downstream_head=_named_head("DPTPts3dPose"),
+    )
+
+    with pytest.raises(RuntimeError, match="head_type=None"):
+        _validate_model_interface(model, "cut3r_512_dpt_4_64.pth")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("output_mode", "pts3d", "must be 'pts3d\\+pose'"),
+        ("pose_head_flag", False, "enabled pose head"),
+    ],
+)
+def test_loaded_model_interface_rejects_disabled_model_contract(
+    field: str, value: object, message: str
+) -> None:
+    model = SimpleNamespace(
+        config=SimpleNamespace(),
+        head_type="dpt",
+        pose_head_flag=True,
+        output_mode="pts3d+pose",
+        downstream_head=_named_head("DPTPts3dPose"),
+    )
+    setattr(model, field, value)
+
+    with pytest.raises(RuntimeError, match=message):
+        _validate_model_interface(model, "cut3r_512_dpt_4_64.pth")
+
+
+@pytest.mark.parametrize(
+    ("head", "message"),
+    [
+        (_named_head("DPTPts3dPose", has_pose=False), "must enable pose"),
+        (_named_head("DPTPts3dPose", pose_decoder=False), "decoder is missing"),
+    ],
+)
+def test_loaded_model_interface_rejects_incomplete_downstream_pose_head(
+    head: object, message: str
+) -> None:
+    model = SimpleNamespace(
+        config=SimpleNamespace(),
+        head_type="dpt",
+        pose_head_flag=True,
+        output_mode="pts3d+pose",
+        downstream_head=head,
+    )
+
+    with pytest.raises(RuntimeError, match=message):
         _validate_model_interface(model, "cut3r_512_dpt_4_64.pth")
 
 
