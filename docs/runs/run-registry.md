@@ -455,6 +455,67 @@ no compute PID. Checkpoint and input hashes remained unchanged. The next
 attempt must use new run ID `GATE0-REAL-0002`; TUM remains locked until it
 passes.
 
+### GATE0-REAL-0002: Corrected official ReCal3R two-image smoke
+
+- Status: **succeeded — Gate 0 PASS**
+- Start/end: 2026-08-01 17:49:00–17:49:29 CST
+- StateGuard3R commit: `5231580b15750cfaa6ce374ce7b67b29f65fa574`
+- Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Main PID: `3882890`; exit code: `0`
+- GPU: physical index 4, NVIDIA L20; two preflight snapshots each reported
+  45,586 MiB free, 0% utilization, P8, and no compute PID
+- Checkpoint: 3,173,761,006 bytes, SHA-256
+  `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`
+- Inputs: the same two Chateau files and hashes recorded for 0001
+- Log: `logs/gate0-real-0002.log`, 6,961 bytes, SHA-256
+  `b3678bb06e6a13be94e369100e038b8a1f684696cb441617d66ab4b35627a22c`
+- Output: `outputs/gate0-real-0002`
+
+The model command matched 0001 except for the new output/log paths and the
+corrected clean runner commit. It used the ReCal3R isolated interpreter,
+project-local TMP/cache paths, `CUDA_VISIBLE_DEVICES=4`, `--device cuda
+--size 512 --seed 0 --beta-base 0.1`, and the frozen checkpoint SHA. The exact
+argv is also embedded in `run.json`. Both repositories were tracked-clean at
+launch.
+
+Observed result:
+
+- the checkpoint loaded with `strict=false`; missing and unexpected keys were
+  empty;
+- the effective interface was `head_type=dpt`, `DPTPts3dPose`,
+  `output_mode=pts3d+pose`, with pose flag and decoder present;
+- the actual cuRoPE extension path/size/SHA matched the frozen provenance;
+- two frames caused exactly `N-1 = 1` calibrated update and trace step `[1]`;
+- inference-scope runtime was 1.052124 seconds, 1.900916 FPS, and peak allocated
+  memory was 6,362.670 MiB; the approximately 28.995-second wall time included
+  startup and checkpoint loading and must not be confused with FPS scope;
+- health, trajectory, and prediction summaries each aligned to two frames and
+  all recorded numeric values were finite;
+- frame 1 recorded uncertainty 0.797944, reliability 0.202056,
+  `global_state_delta=1.665824`, pose jump 5.136780, and geometric residual
+  0.0558443.
+
+Output hashes:
+
+```text
+checkpoint-load-audit.json  3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d
+health.jsonl                3d621a94ce71870b186ff24724f32331c31a38986767d71918f32fb70e8b67e6
+predictions-summary.json    e713a28cf2cd44b5eb718571140e1f879dbf5e1ed913dfe93ae3ee9e45d6f0ca
+run.json                    92f365150742fce0684ed60e9733d0db607a8d7888773fd52765caaa32bc76b3
+trajectory.json             2003ceefbd22dc6c85b4ae133523e424a46590802203dc32d9b9ab43012b8bc0
+```
+
+`run.json.log_path` is `null` because shell `tee` owns the external log; the
+registry path and hash above bind it to this run. `update_magnitude`,
+candidate/final beta, and local-memory delta remain `null`; only the recorded
+`global_state_delta` may be claimed. The two Chateau images are not a real
+continuous sequence, so the pose jump is a smoke signal rather than accuracy
+or drift evidence. Checkpoint/input hashes remained unchanged. After exit,
+GPU 4 returned to 4 MiB used, 45,586 MiB free, 0% utilization, P8, with no
+compute PID. This PASS unlocks only the next 4–8-frame smoke, not detection or
+quarantine.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.

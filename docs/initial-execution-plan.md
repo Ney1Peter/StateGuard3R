@@ -2,7 +2,7 @@
 
 日期：2026-07-31
 
-状态：执行中；Gate 0 为 HOLD / evidence pending
+状态：执行中；Gate 0 已通过，Phase 5 科研结论仍为 HOLD / evidence pending
 
 预计持续时间：12–24 小时（包含环境安装、最小数据获取、GPU 推理和评测；若上游依赖编译或网络较慢，实际墙钟时间可能更长）
 
@@ -321,7 +321,7 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] 已阅读服务器规则和研究计划。
 - [x] 已确认 StateGuard3R 初始仓库工作区干净。
 - [x] 已确认 Project2 顶层当前不是 Git 仓库。
-- [x] 已确认 `/data` 最新剩余约 506 GiB、使用率 97%，必须限制下载和重复输出。
+- [x] 已确认 `/data` 最新剩余约 324 GiB、使用率 98%，必须限制下载和重复输出。
 - [x] 已完成本地资源、ReCal3R 上游和最小数据方案的并行只读核查。
 - [x] 已在 `baselines/ReCal3R` 固定官方 commit `466c7cdf`，工作区干净。
 - [x] 已建立 ReCal3R 独立 `.venv`；CPU import、CUDA RoPE 编译和官方两图
@@ -345,7 +345,8 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
       审计：官方 loader 后的 60 帧均为独立 `1x3x384x512` tensor，五帧移动遮挡逐像素
       符合协议，输入 tensor 和 Chateau 源文件未变，且 CUDA 未初始化。两图 fixture
       只能证明路由与像素执行，不能证明真实 corruption 强度、模型响应或科研指标。
-- [x] 已限制数据范围：截至 2026-08-01 没有下载数据集，也没有启动 GPU 任务。
+- [x] 已限制数据范围：截至 Gate 0 通过时没有下载数据集；GPU 仅运行两图 smoke，
+      没有启动训练或多卡任务。
 - [x] 用户已从官方 README 的 Google Drive 入口取得 512 DPT checkpoint；静态审计
       记录了 3,173,761,006-byte 大小和首次 SHA-256 `45f7e98a…f8103`，文件已设为只读，
       且没有 partial。官方未发布 checksum，因此 runner 仍须在反序列化前后复核哈希。
@@ -354,12 +355,16 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
       仍须紧邻复查并显式绑定单卡。
 - [x] 官方 512 checkpoint 已在 0001 中成功反序列化，`strict=false` 的 missing / unexpected
       keys 均为空；这只通过加载子门槛，不代表模型 forward。
-- [ ] 真实两图的 model-to-CUDA、cuRoPE kernel、forward 和一次 calibrated update 尚未执行。
 - [x] `GATE0-REAL-0001` 已保留为 pre-forward 失败证据：checkpoint 反序列化与全部
       state-dict keys 匹配，但 runner 错从被基类替换的 `model.config` 读取 head 契约，
       在 `model.to(cuda)` 前误拒绝。`5a8e609` / `ee5768c` 已按 pinned 真实 model 与
       downstream 字段修复并补齐回归测试；重试必须使用全新 0002 路径。
-- [ ] 真实 clean/corruption Health Ledger、formal holdout 指标和科研 Go/No-Go
-      尚无证据，因此 TUM 下载、quarantine 和 rollback 继续禁入。
+- [x] `GATE0-REAL-0002` 已在干净提交 `5231580` 上通过：官方 512 DPT checkpoint、
+      `DPTPts3dPose`、cuRoPE、两图 CUDA forward 和恰好一次 calibrated update 均通过
+      守卫；所有轻量输出 finite。推理段 1.052124 秒、1.900916 FPS，峰值 allocated
+      显存 6,362.670 MiB，退出后 GPU 4 恢复为空闲状态。
+- [ ] 4–8 帧 clean state smoke、真实 corruption Health Ledger、formal holdout 指标和
+      科研 Go/No-Go 尚无证据。当前只解锁下一层 4–8 帧 smoke；TUM Gate 1 必须等待
+      该层通过，quarantine 和 rollback 继续禁入。
 
 状态更新规则：每完成一个阶段，立即更新本节、运行登记和验证结果；只有满足上一阶段门槛才推进下一阶段。

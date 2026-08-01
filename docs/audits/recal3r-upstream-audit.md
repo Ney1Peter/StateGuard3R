@@ -648,11 +648,12 @@ Gate 0 readiness 还完成了以下三组加固；这些提交只强化 runner �
 - `oracle_window=1` 的恒零 `err` 不进入 health，更新量来自同帧
   `global_state_delta`；未实现的 overlap 保留 `null`。
 
-截至 2026-08-01 03:14 CST，最新全套测试为 `174 passed`，CPU pinned
-interface/provenance 检查和官方两图 preprocessing 已通过；检查过程未初始化 CUDA，
-cuRoPE kernel、checkpoint load 和真实模型 forward 均未执行。官方 Google Drive 权重
-入口仍连接超时，且八张 GPU 都有既有进程。因此本节是冻结执行契约，不是实测
-ReCal3R 结果。
+截至 2026-08-01 17:50 CST，最新全套测试为 `179 passed`。用户从官方入口取得的
+3,173,761,006-byte checkpoint 已固定首次 SHA-256；`GATE0-REAL-0002` 在干净提交
+`5231580` 上完成真实两图 CUDA forward，核验了 512 DPT / `DPTPts3dPose` 接口、
+cuRoPE provenance、空 state-dict incompatibility、`N-1=1` 次 calibrated update 和
+全部轻量输出 finite。推理段为 1.052124 秒，峰值 allocated 显存 6,362.670 MiB，退出后
+GPU 已释放。该结果只通过两图 Gate 0，不是连续序列、精度、detection 或科研 Go 证据。
 
 ## 15. 主要官方资料
 

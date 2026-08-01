@@ -1,8 +1,8 @@
 # StateGuard3R 初步可行性报告
 
 - 日期：2026-08-01
-- 证据截止时间：2026-08-01 03:14 CST
-- StateGuard3R 证据快照：`483ade139400bce27a5f94bc9c9a08a8b0d40c65`
+- 证据截止时间：2026-08-01 17:50 CST
+- StateGuard3R 证据快照：`5231580b15750cfaa6ce374ce7b67b29f65fa574`
 - ReCal3R 固定上游：`466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
 - 当前结论：**HOLD — evidence pending**
 
@@ -26,7 +26,8 @@
 - CroCo RoPE CUDA 扩展已用 CUDA 12.1 编译成功。runner 现会拒绝 baseline 目录外的
   扩展，并冻结实际加载 `.so` 的 9,523,120 B 大小和 SHA-256
   `3bd89991bcebb9501da085f4722c55fd5ef48aa38936608ef986072313d9aede`。这证明构建链与
-  CPU import 可用，**不证明**扩展已在 GPU 上执行。
+  CPU import 可用。17:49 的 Gate 0 随后在 GPU 上完成真实 forward，并在运行记录中固定
+  同一扩展 provenance。
 - 外部 runner `scripts/run_recal3r_smoke.py` 的 CLI `--help` 已在 ReCal3R 独立
   解释器中通过。runner 已静态覆盖 checkpoint 文件名—输入尺寸—head 类型绑定、
   反序列化前 SHA-256 校验、模型模块来源、baseline/StateGuard3R 工作树状态、输入快照
@@ -36,12 +37,12 @@
   ReCal3R smoke 显式选择 `model_update_type=recal3r` 与 `beta_base=0.1`（上游 parser
   默认仍为 `cut3r`），并按官方 relpose launcher 的赋值语义同时冻结 model/config 两层的
   `entropy_eps=2e-14`、`entropy_head_reduce=mean`、
-  `uncertainty_clamp_max=1.0` 和 `decay=0.95`。这些仍是接口与守卫证据，不是模型 forward
-  证据。
+  `uncertainty_clamp_max=1.0` 和 `decay=0.95`。0001 暴露并修复了 pinned model 的真实
+  head 字段读取问题；0002 随后让这些接口与守卫接受真实模型并完成 forward。
 - 官方 CPU image loader 已加载 Chateau 两图，得到 `1x3x384x512`、值域
   `[-1, 1]` 的输入；加载前后源文件哈希不变。该结果只通过预处理子门槛。
 - 2026-08-01 使用项目内 `TMPDIR` 和 `UV_CACHE_DIR` 实跑完整测试套件，最新明确隐藏
-  CUDA 的复核结果为 `174 passed in 1.16s`。测试覆盖 corruption manifest、只读 replay、Health Ledger、
+  CUDA 的复核结果为 `179 passed in 0.79s`。测试覆盖 corruption manifest、只读 replay、Health Ledger、
   detection-only、timeline、synthetic CLI、正式 detection freeze/provenance gate 和
   ReCal3R runner 的 mock/静态契约；测试没有加载真实 checkpoint，也没有启动 CUDA。
 
@@ -73,6 +74,7 @@
 | `8f6360c`、`e2d5f86` | 修复 pinned model `load_state_dict` override 误拒绝并增加委托/旁路测试 |
 | `59a1eac`、`8bf6154` | 冻结官方 ReCal3R runtime 参数、来源 provenance 与回归测试 |
 | `2c44ea8`、`483ade1` | 冻结实际 cuRoPE binary provenance 与路径拒绝测试 |
+| `1fb5369`、`5a8e609`、`ee5768c`、`5231580` | checkpoint/GPU 解阻、真实 pinned head 接口修复与测试、0001 失败登记 |
 
 以上提交证明代码和审计链已建立；它们不能替代 checkpoint forward、真实时序数据或
 holdout 结果。
@@ -175,72 +177,71 @@ risk 绝对幅值完全不具备现实校准意义。
 已由 0003 取代，不能引用为移动遮挡证据。`outputs/synthetic-smoke-0001` 使用旧 v0
 坐标契约，仅保留作 stale debugging artifact，也不应引用为当前管线证据。
 
-## 3. 尚未获得的真实 ReCal3R 证据
+## 3. 真实 ReCal3R Gate 0 与剩余证据缺口
 
-### 3.1 当前阻塞与缺失证据
+### 3.1 Gate 0 结果
 
-官方 final checkpoint `cut3r_512_dpt_4_64.pth` 仍不存在。官方 README 指向的
-Google Drive file ID `1Asz-ZB3FfpzZYwunhQvNPZEUA8XUNAYD` 在多次有限时连接中于
-DNS/HTTPS 建连阶段超时；02:58 CST 的最新限时检查仍在 DNS 或直连 HTTPS 阶段
-超时并返回 HTTP `000`、零响应体。CUT3R 官方主仓库最新 README 仍只列相同 Drive
-文件。对两个官方 GitHub 仓库的 issue/release 元数据检查没有发现权重
-release 或已确认的替代入口；CUT3R 仓库 contributor 链接的 Hugging Face 仓库只明确
-用于处理后数据，不能据此推断存在模型。Project2 范围及扩展至 `/data/wangzheng` 的
-本地只读查重均没有找到真实文件、`.part` 或 `.partial`。没有使用第三方镜像。官方未
-发布可信 checksum，所以未来首次取得文件后计算的 SHA-256 只能证明本项目内的一致性，
-不能单独认证来源。224 Linear fallback 也不存在；即使取得，它也只能做 `--size 224` 接口
-smoke，不能替代 512 final baseline 或正式指标。
+用户从官方 README 的 Google Drive 入口取得 final checkpoint
+`cut3r_512_dpt_4_64.pth`。文件为 3,173,761,006 bytes，首次项目内 SHA-256 为
+`45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`，已设为只读；官方
+没有公布 checksum，因此该哈希只能固定本地一致性，来源认证仍依赖用户声明的官方入口。
 
-最近一次 GPU 检查（2026-08-01 03:14 CST）显示 8 张 L20 均有既有 compute
-process，显存占用约为 `395, 30854, 8592, 18909, 24651, 26139, 25249, 41495 MiB`，
-没有一张卡满足完全空闲规则。未停止或修改任何他人进程，也没有启动 CUDA。GPU 状态会
-变化；在新的启动前检查明确找到完全空闲卡之前，GPU gate 继续视为阻塞。同期 `/data`
-剩余约 506 GiB（使用率 97%），仍不允许无门禁扩展下载或重复输出。
+`GATE0-REAL-0001` 成功反序列化 checkpoint 且 missing/unexpected keys 为空，但 runner
+错误地从 pinned 父类替换后的 `model.config` 读取外层 head 字段，在 model-to-CUDA 前
+误拒绝。该失败已完整保留，不是 checkpoint 不兼容。`5a8e609` / `ee5768c` 修复并测试了
+真实 `model.head_type`、`model.output_mode`、`model.pose_head_flag` 和 downstream pose
+结构契约。
 
-因此下列真实证据全部尚未获得：
+`GATE0-REAL-0002` 随后在干净提交 `5231580`、固定 ReCal3R commit、GPU 4 和同一输入/
+checkpoint 哈希上成功完成。实测证据包括：
 
-- 官方 checkpoint 的安全加载、state-dict/head 兼容性和真实模型初始化；
-- RoPE kernel 的 GPU 执行、两张 Chateau 图片的 ReCal3R recurrent forward，以及
-  预期恰好一次 calibrated update；
-- 4–8 帧 clean smoke、输出 finite 检查、runtime、peak GPU memory 和退出后显存释放；
-- 来自真实 forward 的 uncertainty/reliability、attention entropy、global-state delta、
-  pose jump、cross-head pointmap residual、trajectory 或 pointmap/depth 证据；
-- 任意 TUM 输入、clean baseline、真实三类 corruption 响应和状态污染/传播现象；
-- 独立 development/holdout、正式冻结阈值，以及真实 AUROC、F1、FPR、detection delay；
-- 支持 Phase 5 Go/No-Go 或 quarantine/rollback 的真实证据。
+- 官方 512 DPT / `DPTPts3dPose` 接口与全部 state-dict keys 匹配；
+- 实际 cuRoPE binary provenance 匹配，真实 CUDA forward 完成；
+- 两帧恰好执行 `N-1=1` 次 calibrated update，trace steps 为 `[1]`；
+- health、trajectory、prediction summary 均为两帧且全部已记录数值 finite；
+- 推理段 1.052124 秒、1.900916 FPS，峰值 allocated 显存 6,362.670 MiB；约 28.995 秒
+  端到端墙钟包含启动与权重加载，不能与 FPS scope 混写；
+- 帧 1 的 uncertainty/reliability 为 0.797944/0.202056，`global_state_delta=1.665824`、
+  pose jump 5.136780、geometric residual 0.0558443；
+- checkpoint 和输入哈希运行后不变，进程退出后 GPU 4 回到 4 MiB、无 compute PID。
+
+`update_magnitude`、candidate/final beta、local-memory delta 仍为 `null`，不得声称已获得。
+两张 Chateau 图片也不是真实连续序列，其 pose jump 不能解释为精度、漂移或科研性能。
+因此仍未获得 4–8 帧 clean state 行为、TUM clean baseline、真实三类 corruption 响应、
+独立 development/holdout、正式 AUROC/F1/FPR/delay，以及支持 quarantine/rollback 的证据。
 
 ### 3.2 Gate 状态
 
 | Gate | 状态 | 证据与约束 |
 |---|---|---|
 | 官方来源、固定 commit、许可证与环境隔离 | **PASS** | 上游固定、CPU import、环境 freeze 与依赖检查已完成 |
-| Corruption/Health/Detection 实现与单元测试 | **PASS（软件层）** | 174 tests passed；不等于模型或科研验证 |
+| Corruption/Health/Detection 实现与单元测试 | **PASS（软件层）** | 179 tests passed；不等于模型或科研验证 |
 | Synthetic v1 metadata/detection + CPU pixel materialization | **PASS（开发层，有限）** | 0003 可重复生成并通过 strict loader；独立审计证明五帧遮挡像素逐帧移动、源图只读；非 formal、非模型/真实实验 |
-| 官方 512 checkpoint | **BLOCKED** | 官方入口不可达，本地无真实文件，未使用第三方来源 |
-| 完全空闲单卡 | **BLOCKED** | 最新登记快照无合规空闲卡；每次启动前必须重查并显式绑定单卡 |
-| Gate 0：Chateau 两图真实 ReCal3R smoke | **BLOCKED / NOT RUN** | CPU preprocessing 通过；checkpoint load、CUDA forward、一次 update 未发生 |
-| 4–8 帧真实 clean smoke | **LOCKED** | 只有 Gate 0 通过后才能执行 |
-| Gate 1：7.69 MiB TUM `fr1_xyz` AVI | **LOCKED；当前禁止下载/运行** | 只有前述真实 smoke 通过后才允许；AVI 不能用于 ATE/RPE |
+| 官方 512 checkpoint | **PASS（来源边界有限）** | 用户声明取自官方入口；大小/首次 SHA 已冻结并只读，官方无 checksum |
+| Gate 0 单卡资源 | **PASS（当次快照）** | GPU 4 连续两次空闲并显式绑定；运行峰值 6,362.670 MiB，退出后释放 |
+| Gate 0：Chateau 两图真实 ReCal3R smoke | **PASS** | 0002 完成真实 CUDA forward、一次 update、finite 轻量输出与完整 provenance |
+| 4–8 帧 clean state smoke | **NEXT / UNLOCKED** | 先用现有官方资产做最小连续状态/trace 对齐检查，不宣称真实连续场景 |
+| Gate 1：7.69 MiB TUM `fr1_xyz` AVI | **LOCKED pending 4–8 frames** | 前述 smoke 通过后才允许；AVI 不能用于 ATE/RPE |
 | Gate 2：328.07 MiB `fr1_desk.tgz` | **LOCKED；当前禁止下载** | 只有 Gate 0、4–8 帧和 Gate 1 均通过后才允许 |
 | 真实 Health Ledger 与三类 corruption | **LOCKED** | 依赖真实连续 forward；不得用 synthetic ledger 顶替 |
 | 正式 development/holdout detection | **LOCKED** | 尚无真实日志与冻结开发集配置，不能检验 AUROC > 0.75 等 Go 条件 |
 | Phase 5 科研决策 | **HOLD — evidence pending** | 证据不足，既非 Go 也非方法 No-Go |
 | Quarantine/rollback | **LOCKED；当前禁止进入** | 仅在真实 formal detection 满足预设 Go gate 后才可开始 |
 
-当前必须同时解除官方 checkpoint 和完全空闲 GPU 两个启动阻塞。任一项仍未通过时，
-不得把 CPU import、单元测试或 synthetic 指标升级为 Gate 0 通过。
+checkpoint 与当次 GPU 门禁已经解除，Gate 0 已通过。当前只能推进 4–8 帧 clean state
+smoke；不得把两图结果升级为连续序列、detection 或科研 Go。
 
 ### 3.3 严格解阻顺序
 
-1. 仅从官方入口取得 512 DPT 4–64 checkpoint，或由用户提供可追溯到官方来源的既有
-   只读副本；记录来源、实际字节数和 SHA-256。来源无法确认时不反序列化。
-2. 紧邻运行前重新检查全部 GPU。只选择一张无 compute process、无非零任务占用的卡，
-   显式设置单个 `CUDA_VISIBLE_DEVICES`；不得停止、迁移或干扰既有进程。
-3. 在固定且可审计的 StateGuard3R/ReCal3R commit 上运行两张 Chateau 图片的 512
-   smoke。必须验证 checkpoint/head 契约、全部关键输出 finite、`N-1 = 1` 次 calibrated
-   update、输入/权重运行前后 hash、runtime/peak memory、进程退出和显存释放。
-4. 两图完全通过后才扩到 4–8 帧，验证连续状态、trace 对齐、pose/residual 定义及输出
-   数量；失败即维持 HOLD，不进入下一层。
+1. **已完成：**用户从官方入口取得 512 DPT 4–64 checkpoint；项目记录了来源声明、
+   实际字节数和首次 SHA-256，并将文件设为只读。
+2. **已完成：**紧邻运行前连续检查 GPU 并显式绑定单卡；用户允许在显存充足时共享，
+   但本次实际使用的是无 compute PID 的 GPU 4，且未停止、迁移或干扰既有进程。
+3. **已完成：**在固定且可审计的 StateGuard3R/ReCal3R commit 上完成两张 Chateau 图片
+   的 512 smoke，验证了 checkpoint/head、finite 输出、`N-1=1` update、前后哈希、
+   runtime/peak memory、进程退出和显存释放。
+4. **下一步：**扩到 4 帧（通过后最多 8 帧）的无下载 state smoke，验证连续状态、trace
+   对齐、pose/residual 定义及输出数量；它是机械接口检查，不是真实连续场景证据。
 5. 以上通过后，才允许唯一的 Gate 1 数据下载：7.69 MiB `fr1_xyz` RGB AVI，并先限制
    为约 10 帧、再至约 30 帧。它仅用于连续推理 smoke，不报告 ATE/RPE。
 6. Gate 1 通过后，才允许唯一完整包 `fr1_desk.tgz`（328.07 MiB）；先做 8 帧 I/O，
@@ -254,6 +255,7 @@ process，显存占用约为 `395, 30854, 8592, 18909, 24651, 26139, 25249, 4149
    是否进入最小 quarantine pilot。否则保持 HOLD 或给出有证据的 No-Go，并停止
    quarantine/rollback。
 
-综上，当前最积极且严谨的结论是：软件与可复现管线已具备继续实验的基础，但真实
-ReCal3R 核心证据为零。**决定维持 HOLD — evidence pending；立即禁止 TUM 数据推进和
-quarantine，等待官方 checkpoint 与合规空闲 GPU 解阻。**
+综上，当前最积极且严谨的结论是：软件与可复现管线已具备继续实验的基础，真实
+ReCal3R 两图 Gate 0 已通过，但连续序列、corruption detection 和 holdout 核心证据仍为
+零。**决定维持 HOLD — evidence pending；先执行 4–8 帧 state smoke，未通过前不下载
+TUM，quarantine/rollback 继续禁止。**
