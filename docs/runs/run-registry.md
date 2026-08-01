@@ -1548,6 +1548,185 @@ is only to prove and freeze a non-leaking development/holdout protocol,
 including recovery-boundary and spillover scoring. Fifty frames, formal
 detection, quarantine, and rollback remain locked.
 
+## Formal detection pilot v1 records
+
+### FORMAL-V1-0001: Preregistered six-run development/holdout pilot — NO-GO
+
+- Status: **succeeded operationally; formal decision NO-GO; stopped before quarantine/rollback**
+- Evidence publication time: 2026-08-02 06:12:49.351019 CST
+- StateGuard3R execution commit: `e9379cc14c5a629d8c316002bc212fab046f696a`,
+  tracked worktree clean from commitment through evaluate
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`, tracked worktree clean
+- Protocol: `docs/protocols/detection-formal-v1.md`, 17,525 bytes, SHA-256
+  `83138bf4ef1476e19d11469c3e72b9de1bc58114e2cfbfaaa1049394289bb9c1`
+- Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
+- CPU validator SHA-256:
+  `ee26218543ade262a4104a50606c3d00df803b03bbc7d2e9c26b1e09a2b87415`
+- Checkpoint: 3,173,761,006 bytes, SHA-256
+  `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`;
+  local consistency is fixed, while source authentication retains the earlier documented boundary
+- Dataset: the one already present official TUM `fr1_desk` package, 344,011,403 bytes,
+  SHA-256 `e983d6830916e66dc4a46a71368046b149b283de87769690e7aa4e0b9483530c`;
+  no additional data or weights were downloaded
+- Scope: one within-sequence, frame-disjoint pilot; three 30-frame development runs and three
+  30-frame untouched holdout runs, one severity per corruption type
+
+The formal input tree `outputs/formal-v1-inputs-0001` was frozen before any formal forward:
+
+```text
+formal-pilot-manifest.json  1de55c281a780002d8961fd5a05cb507fd1168804aaf1c493c2e48b459d77932
+split-registry.json          f07cc9661b47ff42a89e30151f72b48c3855309a5d74f6af5d47524a4891bd9d
+holdout-commitment.json      f146161aeec23ed5174969a806f3fc55e701a28c37c01695f33e46267f2dc8c7
+```
+
+The commitment directory is `outputs/formal-v1-commit-0001`. Its manifest SHA-256 is
+`4597c30ad8849610900a4f675ea863d23bafa184976898bb2365e2c60726cf0b`, its CPU report is
+`91b4dbb65e1885ae5a9fa786b2aec705d39baefe802ee8ee6dc664c96e1ce945`, and its execution
+not-before is `2026-08-01T21:45:34.066148Z` (`05:45:34.066148` CST). With CUDA hidden and
+uninitialized, the validator proved 385 distinct raw snapshots unchanged, a 24-node input tree,
+190 independently associated RGB/depth/GT records, and all six official-loader 30-frame replays.
+
+Every GPU launch used this command form, with `SPLIT` and `RUN_ID` fixed by the table below and
+stdout/stderr redirected directly to the corresponding read-only main log:
+
+```text
+CUDA_VISIBLE_DEVICES=2 \
+TMPDIR=/data/wangzheng/Project2/StateGuard3R/tmp \
+/data/wangzheng/Project2/baselines/ReCal3R/.venv/bin/python \
+/data/wangzheng/Project2/StateGuard3R/scripts/run_recal3r_smoke.py \
+  --baseline-root /data/wangzheng/Project2/baselines/ReCal3R \
+  --checkpoint /data/wangzheng/Project2/baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth \
+  --checkpoint-sha256 45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103 \
+  --input-manifest /data/wangzheng/Project2/StateGuard3R/outputs/formal-v1-inputs-0001/SPLIT/RUN_ID/input-manifest.json \
+  --output-dir /data/wangzheng/Project2/StateGuard3R/outputs/formal-v1-runs-0001/RUN_ID \
+  --device cuda --size 512 --seed 0 --beta-base 0.1
+```
+
+The physical device was GPU 2, UUID
+`GPU-d2be321e-2001-7e74-d0f0-3ee103fcd250`. Two fresh preflight snapshots immediately before
+each launch both recorded 45,586 MiB free, above the 12,288 MiB gate. The GPU did not need to be
+otherwise idle. No other user's process was stopped, moved, or modified.
+
+| Run ID | Split | `run.json` start–finish (CST) | PID | Runtime s | Peak MiB | Exit |
+|---|---|---|---:|---:|---:|---:|
+| `development-dynamic` | development | 05:50:15.617757–05:50:43.210132 | 3777597 | 3.1911339303 | 6365.5483 | 0 |
+| `development-wrong` | development | 05:54:12.939046–05:54:40.052458 | 3796632 | 3.2127154898 | 6365.5483 | 0 |
+| `development-low` | development | 05:56:39.844595–05:57:06.356312 | 3808459 | 3.0240363348 | 6366.7217 | 0 |
+| `holdout-dynamic` | holdout | 06:02:28.205488–06:02:52.314093 | 3839908 | 2.9378750985 | 6366.7217 | 0 |
+| `holdout-wrong` | holdout | 06:04:08.891812–06:04:33.278006 | 3848069 | 3.2423309051 | 6366.7217 | 0 |
+| `holdout-low` | holdout | 06:08:36.751525–06:09:03.381838 | 3869503 | 3.2144751381 | 6366.7217 | 0 |
+
+All runs were strictly serial, completed 30 frames and 29 calibrated updates, and produced finite
+ledger/trajectory/prediction summaries. Each output directory under
+`outputs/formal-v1-runs-0001` is `0555` and contains exactly the five expected regular,
+non-symlink, `nlink=1`, `0444` artifacts. Total inference-only runtime is
+`18.822566896677017` seconds and maximum peak allocated memory is `6366.7216796875` MiB.
+Every PID was absent postflight and GPU 2 returned to 4 MiB used / 45,586 MiB free.
+
+The evaluation manifest binds each run's files in the order
+`checkpoint-load-audit / health / predictions / run / trajectory`:
+
+```text
+development-dynamic  3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d / 5bc6223c2f2ceff396f3c9bd254413fa3cf3366c1808d6b8d08ef5469789f9b9 / cb11415bfe3765e7ad87fd9655873f319cdaaa553ef948f3e3f935037a8504ed / 3e7c225e8aa52d47b19b59db648ce0df4ea760a8e44e2c045d6953e811d54b4b / fdba3312b792e4c67f56c8a0f8feba908846cd61190fa5a8665f0b0be81d013b
+development-wrong    3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d / c1f9a5a80f7e12ad708f010c989141a3a2db85f9b8fe5e0e87d5eac0656328be / 090e7412fa15220357c7b922c84e3db5582d4429184204c089ac4dbd5200cee8 / 4202544eb3c050234c9aa8eeda803b9b784b6464a9e8a85c69074e7f70197abf / 9de773dc4c2cbe4070628d1f12d254216bc39a1c66b721701275de32c21604ad
+development-low      3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d / c4bf6260f6ff761ea3f235bbb6ecb0ca4123f11517bde3a3c185e0849c4d1283 / 9f38e5fc48e50415c4138c4b8587cb9caf5cfb3e524ea68a4f69f13562186506 / 4a77a71527e0e1abccb9c3654883bf2af52b9b44c0a4db4ac9888ed987900a81 / bf4969a669e0225e1df3aea4c6b5f04f1d57a82f2ea5ee466cbce99404743cef
+holdout-dynamic      3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d / 1110c1553fec53d552636d02a5ec431d5dacad732010c2713f7141b40bb95870 / 0f2f6d2dcc79a70ddf437aa3c9c21f672e6c05bbaafc133d2533ff82a3098676 / cbe1170e5c575ed5b90c73a5d4b5a4befa531330c1df1f527ab541320309428c / e593a5cba488dd748a15b39fa76b31ea1620b6c436939cd1dbba685fb9b210b7
+holdout-wrong        3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d / 93f0d1ad51a96190bc99d6902766ad70c90967b4c28794b3790a15d8f9499d97 / da118ac34d038311579fe8a87b52d66c9ba3cb4b5ccb5c7ea6236446c1105dd5 / 36404f0a753853fbf6b4ee40a7e3c173593e1ffdee218de54ce6555ea66bf3f1 / 21295a21f363f770451b716c9c32548fabd4d8c1d41f6d7c1a46d2a1536e8013
+holdout-low          3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d / e78b31454f53aca6e9eb11b72814aedda0dad5deccb63bf87ef1c84f148d6a8c / 137a278dcc9a922c736daa10f4d940339cf6c057c1ed2f1d5ac1e2f63a8c6c98 / 055ab5ba53333d8a457f5d2070e4954c51e142a31a5e8a5b56bbbeb50144338d / 44cd8d1bdb77bbb7ce49d93e41b0fb565f51eaabcf19f2566c75662aa1eb9eb0
+```
+
+For each run, the three logs are
+`logs/formal-v1-RUN_ID-0001.log`, `logs/formal-v1-RUN_ID-0001-gpu-preflight.log`, and
+`logs/formal-v1-RUN_ID-0001-gpu-postflight.log`; all 18 are regular `0444` files. Their hashes,
+listed as `main / preflight / postflight`, are:
+
+```text
+development-dynamic  c28db74c63651d005deb32c540db3abb1695c63523340ef2fe451299b6d68db4 / 6b1ddf87dc528d49d0e2d1ca4a5e2ba4305dc0241e03647473325d599b6719ff / e392392dd39a9d5021deb25e981affbcc55befab46f36fffdc8e9e632825ef29
+development-wrong    7d2c660a16cfcea33e872efebacac259774fb397c13ee3f0b56f79549892c6d4 / 5ef4e5a746a059db87026531d1cbe05b7f5009e9356afe3559e08b2b163b1018 / c42ccf5aaa387d6d10cf5b02d0fc5763e29e5a27e25e24a969f22d1084599d3d
+development-low      d8d21c68e9ab85d06a8ac06cdfdd20ebaf73a69e63719dafe1a0d132a88ae6c5 / 327b480089fc23c9b6963c3346de00df6ca5afc32cc1996028c409b2f7637b10 / 86532e6459988c73bfd3fb21c685e48a0f04083fa29f1e863a2fc3f5b4ce1947
+holdout-dynamic      deeea9e2559a3313c936d9f4bf6e8226b738bd49b225850edc508dc17ab4392c / 0fff7082c5e5af7edd5c963f41df8ebd50688cb01d6bd620b5918677856c54d3 / 9c4e261b34ec785588996fd213794db2524ccff2f9fc9119536c35e2873f2f93
+holdout-wrong        6cb0b56bb02de34069a269d4ffd6cfe8ff607951109c15eddd68103e99c89113 / 92e605965108e4592274ed94ff6484aa406f32eaeef7bff275595a583f649544 / fdcd4d848d6331b57e9cfa57304cdca6193dff0f23cc3082ab2ce94550b7b5d9
+holdout-low          726e6eff92523553238a4f384674fcd91d42be0fe4c110910ff7095108af13cf / 268373bb811f865ceb3fe32a4246e5fe6bce97531703ee734449c26635a8fe7f / 0dfb05af90e9014e516eab7e0cbe089b331a287dc1aa8d2b6a2fd19afdc62d17
+```
+
+The three development outputs were complete before CPU calibration. Calibration was atomically
+published at 05:59:21 CST, followed by the immutable holdout unlock at
+`2026-08-01T21:59:21.737656Z`:
+
+```text
+calibration-manifest.json  2a09413fc7a1e35952fe5274ed671e1695de33a64d950be63e13e27e3e7f52cc
+search.json                0ded425c800c5e1bc36cd215adc5f55169eec5b1da54f71f771891a580ae285a
+dev-metrics.json           cbead2798333411e10c75943d98ccd369879a284a423474333f8f3cecc912e85
+formal-config.json         6e9bd8a928262d2a1654b67b1622dcd881b80f069a89d22a9cf961bce0cdfc53
+holdout-unlock.json        5456cc1e1055e0ba56502c07723a288a446352fc483b3e833081a2e20fa5466b
+```
+
+The selected configuration was `window=5`, `epsilon=1e-5`, `max_z=10`, `master_seed=0`.
+Frozen thresholds were random `0.8401460333328885`, update-only `3.963046643626984`,
+reliability-only `-0.22396039962768555`, and combined `11.458493581599452`. Holdout response
+bytes and response logs remained unread and unhashed until all three holdout runners had exited
+zero and their exact-five output trees were frozen.
+
+After an independent full provenance/replay audit returned GO, the following CPU command was
+executed exactly once:
+
+```text
+CUDA_VISIBLE_DEVICES='' \
+TMPDIR=/data/wangzheng/Project2/StateGuard3R/tmp \
+.venv/bin/python scripts/run_formal_detection_pilot.py evaluate \
+  outputs/formal-v1-inputs-0001 \
+  outputs/formal-v1-commit-0001 \
+  outputs/formal-v1-calibration-0001 \
+  outputs/formal-v1-runs-0001 \
+  outputs/formal-v1-evaluation-0001
+```
+
+The immutable evaluation tree is `0555`; its files are `0444`. Primary hashes are:
+
+```text
+evaluation-manifest.json  ce17d98ac000d9b1e5df8852553708d03990ba61f42fba743e9626d850792c15
+go-no-go.json             1a9548f276ba87d2d7fb83168ec0fa57601be538df6ecfb813078c2bbcade1cd
+holdout-metrics.json      775c1aead7f8965e9556f37634ba8ad72a402f6190873e9b5d1e290b2d4cdd26
+runtime-summary.json      9d6547ac0e0c354e2226eac432cce15ab20b37d5bef76dd843721006dad8709b
+```
+
+The evaluation manifest binds 11 upstream inputs, 30 run artifacts, and all six SVG timelines.
+The four holdout methods produced:
+
+| Method | Macro AUROC | Macro F1 | Pooled FPR | Events | Mean delay |
+|---|---:|---:|---:|---:|---:|
+| seeded random | 0.4823809524 | 0.1272727273 | 0.2131147541 | 2/3 | 1.5 |
+| update magnitude only | 0.5283333333 | 0.1538461538 | 0.1803278689 | 1/3 | 0.0 |
+| reliability only | 0.5219047619 | 0.3141762452 | 1.0000000000 | 3/3 | 0.0 |
+| combined | **0.6434920635** | **0.4511784512** | **0.1639344262** | **3/3** | **0.0** |
+
+The preregistered conjunctive decision was:
+
+| Check | Actual | Result |
+|---|---:|---|
+| combined equal-corruption macro-AUROC `> 0.75` | 0.6434920635 | **FAIL** |
+| combined minus random `>= 0.10` | 0.1611111111 | PASS |
+| combined within 0.02 of best single signal | combined 0.6434920635; best 0.5283333333 | PASS |
+| same at least two corruption types detected in development and holdout | all three types | PASS |
+| pooled primary FPR `<= 0.20` | 0.1639344262 | PASS |
+| maximum per-run primary FP streak `<= 3` | 2 | PASS |
+| provenance/runtime/replay/reproducibility/real signals | all checks true | PASS |
+
+Only the first check failed, but every condition was required. Final `decision=NO-GO`,
+`scope=within-sequence pilot only`, and `next_step=stop before quarantine or rollback`.
+Combined pooled counts were TP=7, FP=10, TN=51, FN=7. It detected all three events at delay zero;
+mandatory diagnostics found recovery-boundary alarms in 2/3 events and 3/15 washout-frame alarms.
+
+This is not a cross-scene/dataset result: all windows come from one TUM scene, each corruption has
+one severity, low-overlap is a GT-pose proxy rather than measured image overlap, the moving red box
+is not a natural dynamic object, and four-frame reversal is not natural disorder or packet loss.
+The combined score used four real signals but had no overlap signal. Runtime covers
+`inference_recurrent_lighter_only`, and memory is peak allocated rather than end-to-end/reserved.
+The result measures detector discrimination, not ATE/RPE, depth quality, damage propagation, or
+recovery effectiveness. The holdout is now disclosed and must not be used for a confirmatory retune.
+No high-risk skip, reduced-rate, quarantine, rollback, or associated safe-replay intervention was
+launched or created.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.

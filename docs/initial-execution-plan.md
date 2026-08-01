@@ -2,7 +2,7 @@
 
 日期：2026-07-31
 
-状态：执行中；Gate 0 已通过，Phase 5 科研结论仍为 HOLD / evidence pending
+状态：必做阶段已完成；formal detection 结论为 NO-GO，已按预注册规则停止在 quarantine/rollback 之前
 
 预计持续时间：12–24 小时（包含环境安装、最小数据获取、GPU 推理和评测；若上游依赖编译或网络较慢，实际墙钟时间可能更长）
 
@@ -31,14 +31,14 @@ ReCal3R clean baseline
 
 下列内容全部完成，才算完成本计划的必做部分：
 
-- [ ] 记录官方 ReCal3R 来源、许可证、固定 commit、依赖、权重来源和实际运行命令。
-- [ ] 使用独立环境完成单样本 smoke test 和至少一条短序列 clean baseline。
-- [ ] 保存可获得的 trajectory、depth/pointmap、health log、runtime 和 peak GPU memory。
-- [ ] 生成三类 corruption 的可复现配置与标签，不修改原始数据和 GT。
-- [ ] 完成 random、update-magnitude-only、reliability-only、combined health score 四组 detection 对照。
-- [ ] 汇报 AUROC、F1、detection delay、false-positive rate 和时间曲线。
-- [ ] 给出有证据的 Go/No-Go 结论、失败分析和下一步建议。
-- [ ] 所有运行进程、GPU 显存、端口和临时文件完成收尾核查。
+- [x] 记录官方 ReCal3R 来源、许可证、固定 commit、依赖、权重来源和实际运行命令。
+- [x] 使用独立环境完成单样本 smoke test 和至少一条短序列 clean baseline。
+- [x] 保存可获得的 trajectory、depth/pointmap、health log、runtime 和 peak GPU memory。
+- [x] 生成三类 corruption 的可复现配置与标签，不修改原始数据和 GT。
+- [x] 完成 random、update-magnitude-only、reliability-only、combined health score 四组 detection 对照。
+- [x] 汇报 AUROC、F1、detection delay、false-positive rate 和时间曲线。
+- [x] 给出有证据的 Go/No-Go 结论、失败分析和下一步建议。
+- [x] 所有运行进程、GPU 显存、端口和临时文件完成收尾核查。
 
 以下内容是条件任务，不作为 detection 未通过时的强制完成项：
 
@@ -413,10 +413,11 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
       frame 10 与 frame 14 恢复边界出现 pose 响应，但其他 health 方向不一致，只能称
       受控四帧 reverse exploratory boundary response；输出、日志均已只读冻结，
       PID/GPU 已释放。
-- [ ] formal development/holdout 指标和科研 Go/No-Go 尚无完整证据。三类 exploratory
-      ledger 都来自同一条 30 帧窗口，不能直接重命名为独立 development/holdout，也
-      不在其上静默调阈值。下一步只允许审计并冻结 split、window、epsilon、max-z、
-      seed、四方法阈值、development calibration provenance 和恢复边界/spillover 计分
-      规则；50 帧、formal detection、quarantine 和 rollback 继续禁入，直至该门禁通过。
+- [x] formal v1 已按无泄漏 development/holdout、commitment、开发集校准、holdout unlock
+      和唯一一次 evaluate 完成。combined equal-corruption macro-AUROC 为
+      `0.6434920635`，未满足严格 `> 0.75`；其余六项预注册门槛均通过，正式结论为
+      **NO-GO**。当前 pilot 已终止，不执行 high-risk skip、reduced-rate、quarantine
+      或 rollback；完整证据见 `docs/initial-feasibility-report.md` 和
+      `docs/runs/run-registry.md`。
 
 状态更新规则：每完成一个阶段，立即更新本节、运行登记和验证结果；只有满足上一阶段门槛才推进下一阶段。
