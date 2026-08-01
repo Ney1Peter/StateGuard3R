@@ -402,8 +402,12 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
       update、trace `[1..29]`、180 个 tensor summary 全 finite；clean 前十帧的持久化
       prediction summaries、trajectory，以及仅 timestamp 不同的 health 精确复现；替换/
       回跳边界出现明显但尚未正式评测的 health 响应，PID/GPU 已释放。
-- [ ] dynamic occlusion、wrong-order、formal holdout 指标和科研 Go/No-Go 尚无完整证据。
-      下一步只允许运行 dynamic-occlusion exploratory smoke；通过并登记后才解锁
-      wrong-order。50 帧、formal detection、quarantine 和 rollback 继续禁入。
+- [x] dynamic occlusion 已完成 30 帧真实 CUDA exploratory ledger 和官方 CPU 像素复放：
+      五个移动红框精确 materialize，30/29/180 全通过；前十帧的持久化 prediction
+      summaries、trajectory，以及仅 timestamp 不同的 health 精确复现；受控遮挡有响应
+      但尚未形成可声称的 detector peak，PID/GPU 已释放。
+- [ ] wrong-order、formal holdout 指标和科研 Go/No-Go 尚无完整证据。下一步只允许运行
+      wrong-order exploratory smoke。50 帧、formal detection、quarantine 和 rollback
+      继续禁入。
 
 状态更新规则：每完成一个阶段，立即更新本节、运行登记和验证结果；只有满足上一阶段门槛才推进下一阶段。

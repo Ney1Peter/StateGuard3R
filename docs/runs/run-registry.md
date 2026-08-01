@@ -1288,6 +1288,132 @@ therefore keeps the research decision at HOLD and unlocks only the separately
 frozen dynamic-occlusion exploratory smoke. Wrong-order, 50 frames, formal
 detection, quarantine, and rollback remain locked.
 
+### GATE2-FR1DESK-30-DYNAMIC-OCCLUSION-0001: Controlled moving-red-box response
+
+- Status: **succeeded — exploratory Health Ledger, pixel replay, and audit PASS**
+- Launch/model/postflight: 2026-08-02 00:08:58–00:09:33 CST
+- StateGuard3R commit: `dbc7c73c2d9911ff6841cf0e425629e056517ee6`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
+- Manifest SHA-256: `8a9746079ab56c7b0020de2c73f0544e6bfaeee2bb59e2fef8c4150174588485`
+- Source-adapter SHA-256:
+  `ca7f2532a529f3eb8044644d4b8434f7a2f654d55003da8f9995dad4ee2ce8cc`
+- Checkpoint: 3,173,761,006 bytes, SHA-256
+  `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`
+- Main PID: `2035444`; exit code `0`; physical GPU 4, UUID
+  `GPU-0227ecd0-4186-14bc-2c6b-6bf6377fbd7f`
+- Output: `outputs/gate2-fr1desk-30-dynamic-occlusion-0001`, final directory mode
+  `0555`; exactly five files, all mode `0444`
+- Main log: `logs/gate2-fr1desk-30-dynamic-occlusion-0001.log`, 64,335 bytes,
+  mode `0444`, SHA-256
+  `3c4187c2073f0111b44445fceb56dff978891217b3bf570a5ec9c6e5e26b4042`
+- Preflight log: `logs/gate2-fr1desk-30-dynamic-occlusion-0001-gpu-preflight.log`,
+  17,075 bytes, mode `0444`, SHA-256
+  `992d9a62a59e6ebd696cb43338eb8e112214d2b8cb784eaa155b9c8ca3bc4cfe`
+- Postflight log: `logs/gate2-fr1desk-30-dynamic-occlusion-0001-gpu-postflight.log`,
+  7,965 bytes, mode `0444`, SHA-256
+  `e90c4a752d8ec1f6fc6606c3f1d32c92f84bff4c1147b4baacf7459225cd5e46`
+- Audit log: `logs/gate2-fr1desk-30-dynamic-occlusion-0001-audit.log`,
+  3,263 bytes, mode `0444`, SHA-256
+  `26743569627c573fdb411938459d3a621d1543873f577f694d7e30b42a899d51`
+
+The command differed from the preceding smoke only in its frozen manifest and
+unique output directory:
+
+```text
+CUDA_VISIBLE_DEVICES=4 \
+/data/wangzheng/Project2/baselines/ReCal3R/.venv/bin/python \
+/data/wangzheng/Project2/StateGuard3R/scripts/run_recal3r_smoke.py \
+  --baseline-root /data/wangzheng/Project2/baselines/ReCal3R \
+  --checkpoint /data/wangzheng/Project2/baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth \
+  --checkpoint-sha256 45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103 \
+  --input-manifest /data/wangzheng/Project2/StateGuard3R/outputs/gate2-fr1desk-30-corruption-inputs-v1/dynamic-occlusion-manifest.json \
+  --output-dir /data/wangzheng/Project2/StateGuard3R/outputs/gate2-fr1desk-30-dynamic-occlusion-0001 \
+  --device cuda --size 512 --seed 0 --beta-base 0.1
+```
+
+Both persisted preflight snapshots found GPU 4 at 4 MiB used, 45,586 MiB free,
+0% utilization, P8, and without a compute PID. Both tracked worktrees and all
+frozen hashes were clean/current, and no unique target existed. No other process
+was stopped or changed.
+
+The strict manifest and runner both retain identity source order 0–29. Only
+frames 10–14 have one `rectangle_occlusion` transform each; all other transforms
+are empty. The red `[255,0,0]` rectangle starts at normalized `(0.25,0.25)`, has
+width/height 0.5, and moves by `(0.04,0.025)` per frame in
+`model_input_after_resize_and_center_crop` coordinates. A CUDA-hidden official
+CPU-loader replay independently obtained 30 cloned `1x3x384x512` tensors and
+these exact exclusive boxes:
+
+```text
+(128,  96, 384, 288)  49,152 changed pixels
+(148, 105, 405, 298)  49,601 changed pixels
+(168, 115, 425, 308)  49,601 changed pixels
+(189, 124, 446, 317)  49,601 changed pixels
+(209, 134, 466, 327)  49,601 changed pixels
+```
+
+Every box interior was exactly normalized red `[1,-1,-1]`; every outside pixel,
+loader input, and all 30 source PNG size/hash/mtime/mode/link-count records were
+unchanged. CUDA remained uninitialized throughout replay. `run.json.images`
+correctly records raw PNG hashes, not transformed-tensor hashes; the pixel claim
+comes from the frozen transform plus official-loader replay, not that field alone.
+
+The CUDA run completed 30 predictions, 29 expected/observed updates, trace
+`[1..29]`, and 180 finite tensor summaries. The three persisted output families
+equal clean exactly only at frames 0–9 when the manifest timestamp is excluded
+from health. Health timestamps equal the unchanged, strictly increasing TUM
+order. Health and trajectory signals align exactly, and all 29 pose jumps were
+independently recomputed from the saved matrices.
+
+Observed full-run ranges were:
+
+```text
+geometric_residual  0.0113145745 .. 0.0187678006  (maximum frame 8)
+pose_jump           0.0180341104 .. 0.0535758505  (maximum frame 26)
+uncertainty_u       0.7790557146 .. 0.8115034103
+reliability         0.1884965897 .. 0.2209442854
+global_state_delta  1.0170857439 .. 1.3241643105
+```
+
+At frame 10, the largest-magnitude signed differences for each field within the
+five-frame corruption interval versus the corresponding clean frames were pose jump
+`+0.02050335`, uncertainty `+0.01832145`, reliability `-0.01832145`, global-state
+delta `+0.18258630`, and geometric residual `-0.00187669`. Across all five
+occluded frames, uncertainty and global-state delta were higher than their clean
+counterparts while reliability was lower. At frame 15 the occlusion is gone;
+pose-jump difference is only `-0.00073739`, but global-state delta remains
+`+0.08418447`, and all three persisted output families remain different through
+frame 29. This is an observed recurrent spillover, not proof of damage propagation.
+
+The global pose maximum occurs at frame 26, geometric residual peaks inside the
+clean prefix, and the full-run global-state maximum remains clean frame 1. These
+facts preclude describing this smoke as a successful detector peak. Inference
+runtime was 3.240399 seconds (9.258118 FPS), with 6,366.722 MiB peak allocated.
+PID `2035444` was absent after exit. Immediate postflight found 4 MiB and no
+compute PID at 91% sampled utilization; the later check returned 0% and P8.
+
+Output hashes are:
+
+```text
+checkpoint-load-audit.json  3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d
+health.jsonl                095fc04ac188cb3b132d3f35fb73c9730dc0e5c4abfba7a53540e432f3cfc627
+predictions-summary.json    b3221b662ffd703d40e36910b40ef6730b07844393b888fae0a0f0f0cee356ec
+run.json                    c359862c216d44a2a5c4aadd5cad6f64b80863b9deda251f7f7222b1c09e3e01
+trajectory.json             ce82480f02100502a92c9ad2a3670ca44696c5ef6602f92345e9f5030f0b79c0
+```
+
+One read-only static helper initially accessed the nested rectangle as if it
+were a flat transform key and raised `KeyError`; it wrote nothing. The corrected
+nested parse matched all five rectangles, and the independent CPU pixel replay
+above passed on its first attempt.
+
+This is a controlled in-memory red rectangle, not a natural dynamic-object
+experiment. It has no threshold calibration, holdout metrics, full-tensor
+bitwise comparison, detection result, or research Go. It keeps the decision at
+HOLD and unlocks only the separately frozen wrong-order exploratory smoke; 50
+frames, formal detection, quarantine, and rollback remain locked.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.

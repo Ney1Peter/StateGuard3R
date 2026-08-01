@@ -1,8 +1,8 @@
 # StateGuard3R 初步可行性报告
 
-- 日期：2026-08-01
-- 证据截止时间：2026-08-01 23:40 CST
-- StateGuard3R 证据快照：`e37a86afd56e99713acea10085cb8aed8546b16d`
+- 日期：2026-08-02
+- 证据截止时间：2026-08-02 00:14 CST
+- StateGuard3R 证据快照：`dbc7c73c2d9911ff6841cf0e425629e056517ee6`
 - ReCal3R 固定上游：`466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
 - 当前结论：**HOLD — evidence pending**
 
@@ -238,15 +238,16 @@ finite；推理段 1.348210 秒，峰值 allocated 显存 6,367.173 MiB。它证
 | Gate 2 连续三十帧 clean ledger | **PASS** | 29 次 update/trace、180 summaries finite；前八帧输出精确复现，GPU/PID 释放 |
 | 三类真实输入 corruption 准备 | **PASS（输入层）** | 三个独立 v1 manifest、只引用 raw；strict replay 与 moving-occlusion CPU 像素审计通过 |
 | Low-overlap proxy exploratory ledger | **PASS（响应层，有限）** | 30/29/180 finite；前十帧持久化 prediction summaries/trajectory 精确复现，health 仅 timestamp 不同；未测真实 overlap、非 detection |
-| Dynamic/wrong-order exploratory ledger | **NEXT / SEQUENTIAL** | 只解锁 dynamic occlusion；通过后才运行 wrong-order，不并行跑门禁 |
+| Dynamic-occlusion exploratory ledger | **PASS（受控响应层，有限）** | 五个移动红框像素复放及 30/29/180 通过；有一致方向响应，但全局峰值不支持 detection 声称 |
+| Wrong-order exploratory ledger | **NEXT / SEQUENTIAL** | dynamic 已审计并冻结；现在只解锁 wrong-order，不是 formal detection |
 | 正式 development/holdout detection | **LOCKED** | 尚无真实日志与冻结开发集配置，不能检验 AUROC > 0.75 等 Go 条件 |
 | Phase 5 科研决策 | **HOLD — evidence pending** | 证据不足，既非 Go 也非方法 No-Go |
 | Quarantine/rollback | **LOCKED；当前禁止进入** | 仅在真实 formal detection 满足预设 Go gate 后才可开始 |
 
 checkpoint、GPU、两图 Gate 0、四帧机械 gate、十帧和 30 帧 GPU smoke 均已通过。
 唯一的 `fr1_desk.tgz`、raw tree、八帧 forward、连续 30 帧 clean ledger、三类独立
-corruption 输入和 low-overlap proxy exploratory ledger 也已通过各自门禁。当前只能
-运行 dynamic-occlusion exploratory smoke；不得把不足一秒的 RGB 响应或单次 proxy
+corruption 输入，以及 low-overlap/dynamic 两类 exploratory ledger 也已通过各自门禁。
+当前只能运行 wrong-order exploratory smoke；不得把不足一秒的 RGB 响应或两次受控
 smoke 升级为 ATE/RPE、formal detection 或科研 Go。
 
 ### 3.3 严格解阻顺序
@@ -268,9 +269,8 @@ smoke 升级为 ATE/RPE、formal detection 或科研 Go。
    只使用相同 30 帧来源，不自动扩到 50 帧。原始数据保持只读，不运行会大量复制图片
    的 TUM long preprocessing 脚本。
 7. **进行中：**共享 clean-source adapter 与三份单污染 v1 manifest 已冻结；low-overlap
-   index/GT-pose proxy 已完成真实 ledger、双重独立审计和只读冻结。下一步只运行 dynamic
-   occlusion，完整审计并提交后才解锁 wrong-order。三次均只是 exploratory Health
-   Ledger，不在其上调 formal 阈值。
+   proxy 和 dynamic occlusion 均已完成真实 ledger、双重独立审计和只读冻结。下一步只
+   运行 wrong-order。三次均只是 exploratory Health Ledger，不在其上调 formal 阈值。
 8. 在真实序列上划分 development/holdout，先冻结 window、epsilon、max-z、seed 和四方法
    阈值，再运行三类 corruption 的 formal detection，报告真实分组与总体 AUROC、F1、
    FPR、delay、timeline、runtime 和 memory；不得用 holdout 反复调参。
@@ -281,7 +281,7 @@ smoke 升级为 ATE/RPE、formal detection 或科研 Go。
 
 综上，当前最积极且严谨的结论是：软件与可复现管线已具备继续实验的基础，真实
 ReCal3R 两图 Gate 0、四帧机械 gate、Gate 1 十帧/30 帧以及 Gate 2 八帧/30 帧 clean
-smoke 已通过，三类 corruption 输入已冻结，low-overlap proxy 也获得一次真实模型响应，
-但另外两类响应和 holdout 核心证据仍不足。**决定维持 HOLD — evidence pending；下一步
-只运行 dynamic-occlusion exploratory smoke，50 帧、formal detection 与
-quarantine/rollback 继续禁止。**
+smoke 已通过，三类 corruption 输入已冻结，low-overlap proxy 与 dynamic occlusion 也
+获得真实模型响应，但 wrong-order 和 holdout 核心证据仍不足。**决定维持 HOLD —
+evidence pending；下一步只运行 wrong-order exploratory smoke，50 帧、formal
+detection 与 quarantine/rollback 继续禁止。**
