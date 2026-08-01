@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from dataclasses import replace
+from decimal import Decimal
 from functools import lru_cache
 
 import numpy as np
@@ -120,6 +121,7 @@ def _make_run(
     update_values: list[float] | None = None,
     reliability_values: list[float] | None = None,
     raw_namespace: str | None = None,
+    timestamp_origin: str = "1000.0",
 ) -> DetectionSuiteRun:
     end = EVENT_ENDS[corruption_type]
     if update_values is None:
@@ -159,9 +161,17 @@ def _make_run(
     raw_shas = tuple(sorted(output_shas))
     source_frames = []
     for pool_index, raw_index in enumerate(raw_indices):
-        timestamp = float(1000.0 + raw_index * 0.03)
-        depth_timestamp = timestamp + 0.005
-        gt_timestamp = timestamp + 0.007
+        timestamp_decimal = Decimal(timestamp_origin) + Decimal(raw_index) * Decimal(
+            "0.03"
+        )
+        depth_timestamp_decimal = timestamp_decimal + Decimal("0.005")
+        gt_timestamp_decimal = timestamp_decimal + Decimal("0.007")
+        timestamp_text = f"{timestamp_decimal:.6f}"
+        depth_timestamp_text = f"{depth_timestamp_decimal:.6f}"
+        gt_timestamp_text = f"{gt_timestamp_decimal:.6f}"
+        timestamp = float(timestamp_text)
+        depth_timestamp = float(depth_timestamp_text)
+        gt_timestamp = float(gt_timestamp_text)
         source_frames.append(
             {
                 "path": f"../../../../raw/{namespace}/rgb/{raw_index}.png",
@@ -170,7 +180,7 @@ def _make_run(
                 "physical_line_sha256": _raw_hash("rgb-line", raw_index),
                 "physical_line_size_bytes": 80,
                 "timestamp": timestamp,
-                "timestamp_text": f"{timestamp:.6f}",
+                "timestamp_text": timestamp_text,
                 "raw_rgb_source_index": raw_index,
                 "raw_rgb_source_line": raw_index + 2,
                 "rgb_sha256": source_shas[pool_index],
@@ -186,7 +196,7 @@ def _make_run(
                     "physical_line_sha256": _raw_hash("depth-line", raw_index),
                     "physical_line_size_bytes": 80,
                     "timestamp": depth_timestamp,
-                    "timestamp_text": f"{depth_timestamp:.6f}",
+                    "timestamp_text": depth_timestamp_text,
                     "path": f"../../../../raw/{namespace}/depth/{raw_index}.png",
                     "sha256": _raw_hash(f"{namespace}-depth", raw_index),
                     "size_bytes": 2000 + pool_index,
@@ -204,7 +214,7 @@ def _make_run(
                     "physical_line_sha256": _raw_hash("gt-line", raw_index),
                     "physical_line_size_bytes": 120,
                     "timestamp": gt_timestamp,
-                    "timestamp_text": f"{gt_timestamp:.6f}",
+                    "timestamp_text": gt_timestamp_text,
                     "translation_xyz": [0.0, 0.0, 0.0],
                     "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     "translation_xyz_text": ["0", "0", "0"],
@@ -442,6 +452,12 @@ def _replace_source_pool_sha(
 ) -> DetectionSuiteRun:
     source_manifest = json.loads(run.source_manifest_json)
     source_manifest["frames"][source_pool_position]["rgb_sha256"] = sha256
+    return _replace_source_manifest(run, source_manifest)
+
+
+def _replace_source_manifest(
+    run: DetectionSuiteRun, source_manifest: dict[str, object]
+) -> DetectionSuiteRun:
     source_bytes = _json_bytes(source_manifest)
     input_manifest = json.loads(run.input_manifest_json)
     input_manifest["source_manifest_sha256"] = hashlib.sha256(source_bytes).hexdigest()
@@ -1014,6 +1030,72 @@ def test_pre_forward_commitment_rejects_duplicate_consumed_rgb() -> None:
     )
 
     with pytest.raises(ValueError, match="duplicate RGB SHA identity"):
+        make_run_commitment(changed)
+
+
+def test_pre_forward_commitment_accepts_real_scale_decimal_timestamps() -> None:
+    source = _make_run(
+        "large-timestamps",
+        "holdout",
+        "dynamic_occlusion",
+        timestamp_origin="1305031102",
+    )
+
+    commitment = make_run_commitment(source)
+
+    first = json.loads(source.source_manifest_json)["frames"][0]
+    assert first["timestamp"] > 1.3e9
+    assert commitment["run_id"] == "large-timestamps"
+
+
+@pytest.mark.parametrize(
+    ("field", "forged_value", "message"),
+    [
+        (
+            "delta_from_rgb_seconds",
+            0.005001,
+            "timestamp and declared association delta disagree",
+        ),
+        (
+            "absolute_delta_seconds",
+            0.005001,
+            "timestamp and declared absolute association delta disagree",
+        ),
+    ],
+)
+def test_pre_forward_commitment_rejects_forged_decimal_association_delta(
+    field: str, forged_value: float, message: str
+) -> None:
+    source = _make_run(
+        "forged-delta",
+        "holdout",
+        "dynamic_occlusion",
+        timestamp_origin="1305031102",
+    )
+    source_manifest = json.loads(source.source_manifest_json)
+    depth = source_manifest["frames"][0]["depth"]
+    depth[field] = forged_value
+    changed = _replace_source_manifest(source, source_manifest)
+
+    with pytest.raises(ValueError, match=message):
+        make_run_commitment(changed)
+
+
+def test_pre_forward_commitment_rejects_forged_timestamp_text() -> None:
+    source = _make_run(
+        "forged-timestamp-text",
+        "holdout",
+        "dynamic_occlusion",
+        timestamp_origin="1305031102",
+    )
+    source_manifest = json.loads(source.source_manifest_json)
+    depth = source_manifest["frames"][0]["depth"]
+    depth["timestamp_text"] = str(
+        Decimal(depth["timestamp_text"]) + Decimal("0.001")
+    )
+    changed = _replace_source_manifest(source, source_manifest)
+
+    with pytest.raises(ValueError, match="timestamp and timestamp_text disagree"):
         make_run_commitment(changed)
 
 

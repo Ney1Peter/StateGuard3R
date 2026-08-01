@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
+from decimal import Decimal
 import hashlib
 import json
 import os
@@ -179,9 +180,19 @@ def _make_input_root(tmp_path: Path) -> Path:
         end = ENDS[corruption_type]
         source_frames: list[dict[str, object]] = []
         for pool_index, raw_index in enumerate(raw_indices):
-            timestamp = float(1000.0 + raw_index * 0.03)
-            depth_timestamp = timestamp + 0.005
-            groundtruth_timestamp = timestamp + 0.007
+            timestamp_decimal = Decimal("1000.0") + Decimal(raw_index) * Decimal(
+                "0.03"
+            )
+            depth_timestamp_decimal = timestamp_decimal + Decimal("0.005")
+            groundtruth_timestamp_decimal = timestamp_decimal + Decimal("0.007")
+            timestamp_text = f"{timestamp_decimal:.6f}"
+            depth_timestamp_text = f"{depth_timestamp_decimal:.6f}"
+            groundtruth_timestamp_text = f"{groundtruth_timestamp_decimal:.6f}"
+            timestamp = float(timestamp_text)
+            depth_timestamp = float(depth_timestamp_text)
+            groundtruth_timestamp = float(groundtruth_timestamp_text)
+            depth_delta = depth_timestamp_decimal - timestamp_decimal
+            groundtruth_delta = groundtruth_timestamp_decimal - timestamp_decimal
             source_frames.append(
                 {
                     "path": f"../../../../raw/{run_id}/rgb/{raw_index}.png",
@@ -190,7 +201,7 @@ def _make_input_root(tmp_path: Path) -> Path:
                     "physical_line_sha256": _hash("rgb-line", raw_index),
                     "physical_line_size_bytes": 80,
                     "timestamp": timestamp,
-                    "timestamp_text": f"{timestamp:.6f}",
+                    "timestamp_text": timestamp_text,
                     "raw_rgb_source_index": raw_index,
                     "raw_rgb_source_line": raw_index + 2,
                     "rgb_sha256": source_shas[pool_index],
@@ -206,7 +217,7 @@ def _make_input_root(tmp_path: Path) -> Path:
                         "physical_line_sha256": _hash("depth-line", raw_index),
                         "physical_line_size_bytes": 80,
                         "timestamp": depth_timestamp,
-                        "timestamp_text": f"{depth_timestamp:.6f}",
+                        "timestamp_text": depth_timestamp_text,
                         "path": f"../../../../raw/{run_id}/depth/{raw_index}.png",
                         "sha256": _hash(f"{run_id}-depth", raw_index),
                         "size_bytes": 2000 + pool_index,
@@ -215,8 +226,8 @@ def _make_input_root(tmp_path: Path) -> Path:
                         "device": 11,
                         "inode": 200_000 + raw_index,
                         "mtime_ns": 2_000_000 + raw_index,
-                        "delta_from_rgb_seconds": 0.005,
-                        "absolute_delta_seconds": 0.005,
+                        "delta_from_rgb_seconds": float(depth_delta),
+                        "absolute_delta_seconds": float(abs(depth_delta)),
                     },
                     "groundtruth": {
                         "source_entry_index": 20_000 + raw_index,
@@ -224,13 +235,13 @@ def _make_input_root(tmp_path: Path) -> Path:
                         "physical_line_sha256": _hash("gt-line", raw_index),
                         "physical_line_size_bytes": 120,
                         "timestamp": groundtruth_timestamp,
-                        "timestamp_text": f"{groundtruth_timestamp:.6f}",
+                        "timestamp_text": groundtruth_timestamp_text,
                         "translation_xyz": [0.0, 0.0, 0.0],
                         "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                         "translation_xyz_text": ["0", "0", "0"],
                         "quaternion_xyzw_text": ["0", "0", "0", "1"],
-                        "delta_from_rgb_seconds": 0.007,
-                        "absolute_delta_seconds": 0.007,
+                        "delta_from_rgb_seconds": float(groundtruth_delta),
+                        "absolute_delta_seconds": float(abs(groundtruth_delta)),
                     },
                     "source_pool_index": pool_index,
                     "source_pool_role": (
