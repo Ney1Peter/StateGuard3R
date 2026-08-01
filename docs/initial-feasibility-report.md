@@ -1,8 +1,8 @@
 # StateGuard3R 初步可行性报告
 
 - 日期：2026-08-01
-- 证据截止时间：2026-08-01 20:57 CST
-- StateGuard3R 证据快照：`4c13eba7093105de0c56847df33cbd4b3bcd25ff`
+- 证据截止时间：2026-08-01 21:22 CST
+- StateGuard3R 证据快照：`4d4a30286296d630e9f6fbd9eb67be218d9a2c9a`
 - ReCal3R 固定上游：`466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
 - 当前结论：**HOLD — evidence pending**
 
@@ -233,7 +233,8 @@ finite；推理段 1.348210 秒，峰值 allocated 显存 6,367.173 MiB。它证
 | Gate 1 三十帧 GPU smoke | **PASS** | 29 次 update/trace、30 帧 finite、真实 health、哈希和 GPU 释放均通过 |
 | Gate 2 `fr1_desk` TGZ 与 raw tree | **PASS** | 唯一完整包已校验；1212 个 raw 文件逐哈希/格式/只读复核，无 partial 或额外下载 |
 | Gate 2 连续八帧输入准备 | **PASS** | 最早有效 0-based RGB 数据索引 17–24（物理行 21–28）；depth/GT ≤20 ms，只引用 raw 文件 |
-| Gate 2 连续八帧 I/O/forward | **NEXT / UNLOCKED** | 检查 7 次 update、finite、落盘、哈希和 GPU 释放 |
+| Gate 2 连续八帧 I/O/forward | **PASS** | 7 次 update/trace、48 个 finite summaries、真实 health、哈希和 GPU 释放通过 |
+| Gate 2 连续三十帧 clean ledger | **NEXT / UNLOCKED** | 先冻结引用窗口；通过前 50 帧与 corruption formal 仍锁定 |
 | 真实三类 corruption Health Ledger | **LOCKED** | 依赖更长 clean baseline；不得用十帧或 synthetic ledger 顶替 |
 | 正式 development/holdout detection | **LOCKED** | 尚无真实日志与冻结开发集配置，不能检验 AUROC > 0.75 等 Go 条件 |
 | Phase 5 科研决策 | **HOLD — evidence pending** | 证据不足，既非 Go 也非方法 No-Go |
@@ -241,8 +242,8 @@ finite；推理段 1.348210 秒，峰值 allocated 显存 6,367.173 MiB。它证
 
 checkpoint、GPU、两图 Gate 0、四帧机械 gate、十帧和 30 帧 GPU smoke 均已通过。
 唯一的 `fr1_desk.tgz` 与 raw tree 也已通过数据门禁。当前只能推进最小 8 帧
-I/O/forward，输入已冻结且不复制图片；不得把数据可读性升级为 ATE/RPE、detection
-或科研 Go。
+I/O/forward 也已通过。当前只能推进同一序列连续 30 帧 clean ledger；不得把八帧
+RGB forward 升级为 ATE/RPE、detection 或科研 Go。
 
 ### 3.3 严格解阻顺序
 
@@ -258,10 +259,10 @@ I/O/forward，输入已冻结且不复制图片；不得把数据可读性升级
 5. **已完成：**Gate 1 下载、十帧 GPU smoke、30 帧增量输入与 30 帧 GPU smoke 均通过；
    30 帧 run 有 29 次 update、180 个 finite tensor summaries，并已验证进程/GPU 释放。
    AVI 仅用于连续推理，不报告 ATE/RPE。
-6. **进行中：**唯一完整包 `fr1_desk.tgz`（328.07 MiB）的下载、raw 解压与连续八帧
-   引用 manifest 已通过；下一步仅运行该 8 帧 I/O/forward，再做 30–50 个连续帧，
-   最后才考虑完整 clean baseline。原始数据保持只读，不运行会大量复制图片的 TUM
-   long preprocessing 脚本。
+6. **进行中：**唯一完整包 `fr1_desk.tgz`（328.07 MiB）的下载、raw 解压、连续八帧
+   引用 manifest 和 forward 均已通过；下一步只扩连续 30 帧 clean ledger，通过后才
+   评估 50 帧或 corruption smoke，最后才考虑完整 clean baseline。原始数据保持只读，
+   不运行会大量复制图片的 TUM long preprocessing 脚本。
 7. 在真实序列上划分 development/holdout，先冻结 window、epsilon、max-z、seed 和四方法
    阈值，再运行三类 corruption 的 formal detection，报告真实分组与总体 AUROC、F1、
    FPR、delay、timeline、runtime 和 memory；不得用 holdout 反复调参。
@@ -274,5 +275,5 @@ I/O/forward，输入已冻结且不复制图片；不得把数据可读性升级
 ReCal3R 两图 Gate 0、四帧机械 gate 和十帧真实连续 RGB smoke 已通过，但更长连续序列、
 30 帧真实连续 RGB smoke 也已通过，但带 GT clean baseline、corruption detection 和
 holdout 核心证据仍不足。**决定维持 HOLD — evidence pending；下一步只推进唯一的
-`fr1_desk` 已冻结连续 8 帧 I/O/forward 门禁，30–50 帧、formal detection 与
-quarantine/rollback 继续禁止。**
+`fr1_desk` 连续 30 帧 clean ledger，50 帧、formal detection 与 quarantine/rollback
+继续禁止。**

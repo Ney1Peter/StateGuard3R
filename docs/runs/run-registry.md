@@ -891,6 +891,76 @@ cannot support ATE/RPE, a depth metric, long-term stability, detection, or a
 research decision, and it unlocks no 30–50-frame experiment before the
 eight-frame forward itself passes.
 
+### GATE2-FR1DESK-8-0001: Eight-frame contiguous raw-TUM smoke
+
+- Status: **succeeded — Gate 2 eight-frame I/O/forward PASS**
+- Start/end: 2026-08-01 21:20:51–21:21:15 CST
+- StateGuard3R commit: `4d4a30286296d630e9f6fbd9eb67be218d9a2c9a`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
+- Main PID: `1107500`; exit code: `0`; GPU: physical index 4
+- External window manifest: `baselines/ReCal3R/data/tum/derived/fr1_desk-gate2-8-v1/window-manifest.json`,
+  SHA-256 `24548d1110af58ca5599bba5737396b8c4b96478b6a4d4f137cc832ae55e9e35`
+- Raw-manifest SHA-256: `5908db0f357fd4a21b2c777220de38e651b48b80c7d53182123c6eb4e7163d87`
+- TGZ SHA-256: `e983d6830916e66dc4a46a71368046b149b283de87769690e7aa4e0b9483530c`
+- Checkpoint: `baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth`, 3,173,761,006 bytes,
+  SHA-256 `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`
+- Configuration: CUDA, image size 512, seed 0, base beta 0.1; the hashed `run.json`
+  is the authoritative full argv with eight explicit ordered `--image` paths
+- Log: `logs/gate2-fr1desk-8-0001.log`, 12,154 bytes, SHA-256
+  `70f95b529fda91985a6a477e1cd797aaa6520743dd05ff727c9d19d88653cd3f`
+- Preflight GPU log: `logs/gate2-fr1desk-8-0001-gpu-preflight.log`, 397 bytes,
+  SHA-256 `9118d614ff76c73a1517a21a0822f40aa958bc189a16cdead50010f3f7282743`
+- Postflight GPU log: `logs/gate2-fr1desk-8-0001-gpu-postflight.log`, 383 bytes,
+  SHA-256 `202c59505faad2b1001f4e795a2219b5105bc9276f5242eb731571f12a0433d9`
+- Output: `outputs/gate2-fr1desk-8-0001`
+
+The exact argv uses the manifest's eight raw RGB paths in source order.
+`run.json.input_manifest` is `null` because this TUM window manifest is
+provenance rather than the corruption schema; this registry externally binds
+the window, raw tree, depth/GT associations, and run. Both tracked trees were
+clean. Two interactive checks and the persisted preflight found GPU 4 at
+45,586 MiB free, 0% utilization, P8, and no compute PID. `gpustat` was
+unavailable, so `nvidia-smi` GPU, compute-app, and `pmon` views were recorded;
+no process was stopped or disturbed.
+
+All eight frames completed with seven expected/observed calibrated updates and
+trace steps `[1..7]`. Health, trajectory, prediction, input, and window frame
+IDs aligned exactly to 0–7; every JSON numeric value and all 48 tensor summaries
+were finite. Frames 1–7 had non-null, non-constant signals: geometric residual
+ranged 0.01338305–0.01868337, pose jump 0.01803411–0.03922328, uncertainty
+0.78875065–0.81150341, reliability 0.18849659–0.21124935, and
+`global_state_delta` 1.11154728–1.32416431. Reliability, pose-jump, and
+cross-file signal equality were independently recomputed within numerical
+precision.
+
+Inference-scope runtime was 1.501171 seconds, 5.329174 FPS, and peak allocated
+memory was 6,364.891 MiB; the recorded post-validation runner interval,
+including imports and model loading, was 23.313784 seconds.
+Postflight found PID `1107500` absent and GPU 4 back at 4 MiB with no compute
+process. Checkpoint, TGZ, raw manifest, window manifest, all eight RGB inputs,
+runner, and recorded code provenance hashes remained unchanged.
+
+Output hashes:
+
+```text
+checkpoint-load-audit.json  3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d
+health.jsonl                f423d2dc46239098a69d0ad103ec6557fb9ec06d9cd2237815112315ecd87a35
+predictions-summary.json    055624fa500a3e2e1ddbbdfd9e54d1953f93b7c0116c9c2f7dbe4c79fa15c0e8
+run.json                    86031349efd5ed1364eae66eddfd687c0a4619aaf9bc7f33b4011110078afede
+trajectory.json             c9e548537c7857046b2ce2bf9fa989bb970cb5c55958bc5395281064c79cac37
+```
+
+Candidate/final beta, internal `update_magnitude`, local-memory delta,
+overlap, risk/decision, and per-frame timestamp remain `null`; first-frame
+update/reliability fields are null by reference-frame design. The external
+manifest retains original TUM timestamps and depth/GT associations, but this
+runner consumes RGB only. Therefore this approximately 0.232-second result
+cannot support ATE/RPE, a depth metric, long-term stability, formal detection,
+or quarantine. It unlocks only a reference-only contiguous 30-frame clean
+ledger preparation and smoke, not a research Go decision or 50-frame/formal
+corruption experiment.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
