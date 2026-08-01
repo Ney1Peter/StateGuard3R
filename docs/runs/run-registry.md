@@ -1168,6 +1168,126 @@ wrong-order remains locked until both preceding runs pass. No threshold may be
 tuned from these smoke outputs and described as frozen development calibration;
 the 50-frame, formal detection, quarantine, and rollback gates remain locked.
 
+### GATE2-FR1DESK-30-LOW-OVERLAP-0001: Exploratory index/GT-pose proxy response
+
+- Status: **succeeded — exploratory Health Ledger and evidence audit PASS**
+- Launch/model/postflight: 2026-08-01 23:26:45–23:27:20 CST
+- StateGuard3R commit: `e37a86afd56e99713acea10085cb8aed8546b16d`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
+- Manifest SHA-256: `8da158a85d19aaec12be53ea52357cf65cf038909fe59f673c0491a6e37be830`
+- Source-adapter SHA-256:
+  `ca7f2532a529f3eb8044644d4b8434f7a2f654d55003da8f9995dad4ee2ce8cc`
+- Checkpoint: 3,173,761,006 bytes, SHA-256
+  `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`
+- Main PID: `1801419`; exit code `0`; physical GPU 4, UUID
+  `GPU-0227ecd0-4186-14bc-2c6b-6bf6377fbd7f`
+- Output: `outputs/gate2-fr1desk-30-low-overlap-0001`, final directory mode
+  `0555`; exactly five files, all mode `0444`
+- Main log: `logs/gate2-fr1desk-30-low-overlap-0001.log`, 63,231 bytes,
+  mode `0444`, SHA-256
+  `af4355b0ff6cb9913598e1c6317241ceef4dbabab67a8d88415ffc700126a0b9`
+- Preflight log: `logs/gate2-fr1desk-30-low-overlap-0001-gpu-preflight.log`,
+  17,069 bytes, mode `0444`, SHA-256
+  `efa2389b0fbaa3d8cdc45a9886bfb72d88d4d3149da94611efe8cdf5c83ae099`
+- Postflight log: `logs/gate2-fr1desk-30-low-overlap-0001-gpu-postflight.log`,
+  7,965 bytes, mode `0444`, SHA-256
+  `e613bb807288de2e1971d922adbbb9780d103d01f808b038358250f9a1aa913f`
+- Audit log: `logs/gate2-fr1desk-30-low-overlap-0001-audit.log`, 2,190 bytes,
+  mode `0444`, final external SHA-256
+  `308c8cc0429683e60feb94edcc2a2e3dac836e2027800f5852a2ca25281aa420`
+
+The exact command, also retained in the preflight log and `run.json`, was:
+
+```text
+CUDA_VISIBLE_DEVICES=4 \
+/data/wangzheng/Project2/baselines/ReCal3R/.venv/bin/python \
+/data/wangzheng/Project2/StateGuard3R/scripts/run_recal3r_smoke.py \
+  --baseline-root /data/wangzheng/Project2/baselines/ReCal3R \
+  --checkpoint /data/wangzheng/Project2/baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth \
+  --checkpoint-sha256 45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103 \
+  --input-manifest /data/wangzheng/Project2/StateGuard3R/outputs/gate2-fr1desk-30-corruption-inputs-v1/low-overlap-jump-manifest.json \
+  --output-dir /data/wangzheng/Project2/StateGuard3R/outputs/gate2-fr1desk-30-low-overlap-0001 \
+  --device cuda --size 512 --seed 0 --beta-base 0.1
+```
+
+Both immediately persisted preflight snapshots found physical GPU 4 at 4 MiB
+used, 45,586 MiB free, 0% utilization, P8, and without a compute PID. The two
+tracked worktrees were clean, the unique output/log targets did not exist, and
+all frozen code, input, source, and checkpoint hashes matched before launch. No
+existing process was stopped or changed.
+
+The strict manifest replay and the runner independently agreed on the exact
+source-index order:
+
+```text
+0..9, 25..29, 15..29
+```
+
+Thus local frames 10–14 substitute source 25–29 (raw RGB indices 42–46), while
+all other frames remain identity references. All resolved paths, current image
+hashes, metadata, transforms, and the `run.json.images` projection matched the
+manifest exactly. The 30 source RGB files remained size/hash/mode/link-count
+identical. Health timestamps follow this final order, including the expected
+14-to-15 time reversal and the repeated timestamps at 10–14 and 25–29.
+
+The model completed 30 predictions, 29 expected/observed calibrated updates,
+trace `[1..29]`, and 180 finite tensor summaries. Health, trajectory, prediction,
+and input IDs all align to 0–29; checkpoint missing/unexpected keys are empty.
+The first ten prediction summaries and trajectory objects equal the clean
+30-frame run exactly. The first ten health objects also equal clean exactly when
+only the manifest-supplied `timestamp` field is omitted. This summary equality
+does not claim bitwise equality of unpersisted full prediction tensors.
+
+Observed signal ranges were:
+
+```text
+geometric_residual  0.0112456265 .. 0.0187678006
+pose_jump           0.0180341104 .. 0.5918007661
+uncertainty_u       0.7683731914 .. 0.8115034103
+reliability         0.1884965897 .. 0.2316268086
+global_state_delta  0.9001695568 .. 1.6197634888
+```
+
+Frame 10 has the maximum pose jump (`0.5918007661`) and global-state delta
+(`1.6197634888`). All five substituted frames have global-state delta
+`1.3776924675..1.6197634888`, above the clean run's overall maximum
+`1.3241643105`. Frame 15 has a second pose-jump peak (`0.5828957277`) when the
+input returns from source 29 to source 15. That frame is outside the manifest's
+10–14 label but is an adjacent causal boundary/spillover, so a later formal
+protocol must state how it is scored rather than silently counting it as an
+ordinary clean false positive. Frames 10–29 differ from clean in all three
+persisted output families, as expected once the recurrent state sees a different
+frame; this alone is not a formal detection or damage-propagation conclusion.
+
+Inference-scope runtime was 3.476418 seconds (8.629573 FPS), and peak allocated
+memory was 6,366.722 MiB. PID `1801419` was absent after exit. Immediate
+postflight found GPU 4 at 4 MiB with no compute PID; utilization was still 71%
+for that sample, then a later check found 0% and P8. The output hashes are:
+
+```text
+checkpoint-load-audit.json  3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d
+health.jsonl                8425d6d0977d56dac85177afcb43ebc705fd23dd751703c6d0631221da7f9f57
+predictions-summary.json    73f3ca326958990ee84b5f16f4b7c9b46cc1948eb74b4e79b4784eb57825c979
+run.json                    26431ae868f43358837c5c6618edf642307af3feedc27888b763849daeefe65d
+trajectory.json             ce5c9d39dc53e139903057da18d16d567bd515fbbb507ee7c9a483ae0d0e465c
+```
+
+The first local read-only audit incorrectly assumed that two top-level
+trajectory semantic-description strings were signal arrays and stopped on that
+assertion without writing any evidence file. The corrected audit used the
+per-frame schema, passed all finite/mapping/prefix/source assertions, and records
+the failed assumption in the frozen audit log. A digest printed for that log
+while `tee` was still writing is explicitly marked provisional; the final
+external digest above is authoritative.
+
+This is one exploratory response to a distant-index/GT-pose proxy. Actual image
+overlap was not measured; there is no threshold calibration, holdout, AUROC,
+F1/FPR/delay, ATE/RPE, or comparison against the four detection methods. It
+therefore keeps the research decision at HOLD and unlocks only the separately
+frozen dynamic-occlusion exploratory smoke. Wrong-order, 50 frames, formal
+detection, quarantine, and rollback remain locked.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
