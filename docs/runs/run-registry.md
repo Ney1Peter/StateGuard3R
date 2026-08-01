@@ -1414,6 +1414,140 @@ bitwise comparison, detection result, or research Go. It keeps the decision at
 HOLD and unlocks only the separately frozen wrong-order exploratory smoke; 50
 frames, formal detection, quarantine, and rollback remain locked.
 
+### GATE2-FR1DESK-30-WRONG-ORDER-0001: Controlled four-frame reverse response
+
+- Status: **succeeded — exploratory Health Ledger, pixel replay, and three-way audit PASS**
+- Launch/model/postflight: 2026-08-02 00:19:44–00:20:17 CST
+- StateGuard3R commit: `e134ae7808f3afa5166f11ee42c5036fd5dc93bc`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
+- Manifest SHA-256: `b1f205411da42e96707f7d158cc9caf73f5d0f69c621ee0188ded965928259dc`
+- Source-adapter SHA-256:
+  `ca7f2532a529f3eb8044644d4b8434f7a2f654d55003da8f9995dad4ee2ce8cc`
+- Checkpoint: 3,173,761,006 bytes, SHA-256
+  `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`
+- Main PID: `2096352`; exit code `0`; physical GPU 4, UUID
+  `GPU-0227ecd0-4186-14bc-2c6b-6bf6377fbd7f`
+- Output: `outputs/gate2-fr1desk-30-wrong-order-0001`, final directory mode
+  `0555`; exactly five files, all mode `0444`
+- Main log: `logs/gate2-fr1desk-30-wrong-order-0001.log`, 63,004 bytes,
+  mode `0444`, SHA-256
+  `553023575b9bce13cf8ac35ce26f2d51f111bbf40d69a291aa9f451ebe02154e`
+- Preflight log: `logs/gate2-fr1desk-30-wrong-order-0001-gpu-preflight.log`,
+  17,071 bytes, mode `0444`, SHA-256
+  `9eb710273b5b150e0341d05e47249d6830a1cbbad783beb4d2dba6ff461605f0`
+- Postflight log: `logs/gate2-fr1desk-30-wrong-order-0001-gpu-postflight.log`,
+  7,965 bytes, mode `0444`, SHA-256
+  `4d4e64795fede754918604dd7206f4a994ce539dc0e8fbcccd95fd8b0443d02a`
+- Audit log: `logs/gate2-fr1desk-30-wrong-order-0001-audit.log`, 5,273 bytes,
+  mode `0444`, SHA-256
+  `6d707cd5f4e6a398b1bf2a5ea82f20a34b4c342df1930726d0d94fedeeb6e567`
+
+The command differed from the preceding smoke only in its frozen manifest and
+unique output directory:
+
+```text
+CUDA_VISIBLE_DEVICES=4 \
+/data/wangzheng/Project2/baselines/ReCal3R/.venv/bin/python \
+/data/wangzheng/Project2/StateGuard3R/scripts/run_recal3r_smoke.py \
+  --baseline-root /data/wangzheng/Project2/baselines/ReCal3R \
+  --checkpoint /data/wangzheng/Project2/baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth \
+  --checkpoint-sha256 45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103 \
+  --input-manifest /data/wangzheng/Project2/StateGuard3R/outputs/gate2-fr1desk-30-corruption-inputs-v1/wrong-order-segment-manifest.json \
+  --output-dir /data/wangzheng/Project2/StateGuard3R/outputs/gate2-fr1desk-30-wrong-order-0001 \
+  --device cuda --size 512 --seed 0 --beta-base 0.1
+```
+
+Both persisted preflight snapshots found GPU 4 at 4 MiB used, 45,586 MiB free,
+0% utilization, P8, and without a compute PID. Both tracked worktrees and all
+frozen hashes were clean/current, the output target did not exist, and no other
+process was stopped or changed. Inference completed in 3.114958 seconds at
+9.630949 FPS, with 6,365.548 MiB peak allocated. PID `2096352` was absent after
+exit. Immediate postflight found 4 MiB and no compute PID at 7% sampled
+utilization.
+
+The final source-index order is exactly:
+
+```text
+0,1,2,3,4,5,6,7,8,9,13,12,11,10,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29
+```
+
+It is a bijection of `0..29`. Frames 10–13 carry exactly one
+`temporal_reorder` transform each: `10->13`, `11->12`, `12->11`, and `13->10`;
+all other transforms are empty and retain identity paths. `run.input_frames`
+matched the strict manifest path, SHA, metadata, and transforms field by field,
+and `run.images` matched their path/SHA projection. Health timestamps follow
+the final source paths: frames 10–13 are strictly decreasing, then frame 14
+jumps forward. Local `frame_id` nevertheless remains the output position
+`0..29`; the model consumes reordered RGB, not timestamp, GT, or depth.
+
+A CUDA-hidden official-loader replay produced 30 independent cloned
+`1x3x384x512` tensors. Because temporal order is already encoded by the final
+paths, every materialized tensor was pixel-equal to its corresponding loader
+input; loader tensors remained unchanged and CUDA was never initialized. All
+30 source PNG SHA/size/mtime/mode/link-count snapshots were identical before
+and after.
+
+The CUDA run completed 30 predictions, 29 expected/observed updates, trace
+`[1..29]`, and 180 finite tensor summaries. Health and trajectory signals align
+exactly, reliability equals `1 - uncertainty_u`, and all 29 pose jumps were
+independently recomputed from saved matrices with zero observed JSON-roundtrip
+error. The three persisted output families equal clean exactly only at frames
+0–9 after removing timestamp from both health records. This comparison covers
+persisted summaries; it does not claim that unpersisted full tensors are
+bitwise equal.
+
+Observed full-run ranges were:
+
+```text
+geometric_residual  0.0113718032 .. 0.0187678006  (maximum frame 8)
+pose_jump           0.0180341104 .. 0.1209270919  (maximum frame 14)
+uncertainty_u       0.7761573792 .. 0.8115034103
+reliability         0.1884965897 .. 0.2238426208
+global_state_delta  0.8707307117 .. 1.3241643105  (maximum frame 1)
+```
+
+At the entry boundary frame 10, pose jump is `0.11747319`, or `+0.09392930`
+versus the corresponding clean frame; global-state delta is `+0.19213671`,
+uncertainty `+0.00137693`, reliability `-0.00137693`, and geometric residual
+`-0.00227916`. Frame 14 restores identity path but jumps from source 10 to
+source 14, outside the labelled reverse interval. Its pose jump is
+`0.12092709`, or `+0.09371665` versus clean. Both pose boundaries exceed the
+clean run's global pose-jump maximum `0.05329814`.
+
+Uncertainty/reliability and global-state delta do not move in a single
+consistent direction throughout frames 10–13, and the full-run global-state
+maximum remains clean-prefix frame 1. Frames 10–29 differ from clean across all
+three persisted output families, but recurrent spillover is not proof of
+damage propagation. In particular, frame 14 is a label-external recovery
+boundary and must not be silently scored as an ordinary clean false positive.
+
+Output hashes are:
+
+```text
+checkpoint-load-audit.json  3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d
+health.jsonl                af99fcbd745053740428c5ed8fac8f80698944d7c8f05957b67b371653093117
+predictions-summary.json    bd0a0e94f4f9dea7ac418c035a6371c4f0c1ac98383e41e6b8a1712b940f8c6b
+run.json                    85cbae1b656de107e24f762a1384b6b1906188cd5e77e26ec7acb5b8d2cbb167
+trajectory.json             bc7aee5745b48aa3fed9c0cbfcfba70eec8e52eba5f274f3ec4e8c9c77ffa844
+```
+
+The main read-only audit retained two harmless local checker retries. First,
+all CPU replay assertions passed but a report-only set attempted to hash a
+list and raised `TypeError` before printing. Second, the JSON checker removed
+timestamp only from the wrong-order side of a clean-prefix comparison and
+raised `AssertionError`; the corrected comparison removes it from both sides.
+Neither attempt wrote or modified a file. The corrected local audit and two
+additional independent read-only audits all passed before freeze.
+
+This is one controlled four-frame reverse response. It is not natural disorder,
+packet loss, a timestamp-anomaly experiment, formal detection, damage
+propagation, holdout evidence, or research Go. All three exploratory ledgers
+are now complete, but they share the same 30-frame source window. The next gate
+is only to prove and freeze a non-leaking development/holdout protocol,
+including recovery-boundary and spillover scoring. Fifty frames, formal
+detection, quarantine, and rollback remain locked.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.

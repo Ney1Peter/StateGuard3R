@@ -406,8 +406,17 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
       五个移动红框精确 materialize，30/29/180 全通过；前十帧的持久化 prediction
       summaries、trajectory，以及仅 timestamp 不同的 health 精确复现；受控遮挡有响应
       但尚未形成可声称的 detector peak，PID/GPU 已释放。
-- [ ] wrong-order、formal holdout 指标和科研 Go/No-Go 尚无完整证据。下一步只允许运行
-      wrong-order exploratory smoke。50 帧、formal detection、quarantine 和 rollback
-      继续禁入。
+- [x] wrong-order 已完成 30 帧真实 CUDA exploratory ledger、三路内容审计和官方 CPU
+      像素复放：最终顺序为 `0..9,13,12,11,10,14..29`，是 `0..29` 的双射；
+      30/29/180、clean 前十帧的 prediction summaries/trajectory 与 health signals
+      （排除 manifest timestamp）精确复现，以及 29 个 pose matrix 重算均通过。
+      frame 10 与 frame 14 恢复边界出现 pose 响应，但其他 health 方向不一致，只能称
+      受控四帧 reverse exploratory boundary response；输出、日志均已只读冻结，
+      PID/GPU 已释放。
+- [ ] formal development/holdout 指标和科研 Go/No-Go 尚无完整证据。三类 exploratory
+      ledger 都来自同一条 30 帧窗口，不能直接重命名为独立 development/holdout，也
+      不在其上静默调阈值。下一步只允许审计并冻结 split、window、epsilon、max-z、
+      seed、四方法阈值、development calibration provenance 和恢复边界/spillover 计分
+      规则；50 帧、formal detection、quarantine 和 rollback 继续禁入，直至该门禁通过。
 
 状态更新规则：每完成一个阶段，立即更新本节、运行登记和验证结果；只有满足上一阶段门槛才推进下一阶段。
