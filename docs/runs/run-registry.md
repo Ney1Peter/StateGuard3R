@@ -703,6 +703,75 @@ This is data preparation only and used no GPU. It unlocks exactly
 `GATE1-FR1XYZ-30-0001`; the TUM TGZ, ATE/RPE, formal detection,
 quarantine, and rollback remain locked until that run passes its own gate.
 
+### GATE1-FR1XYZ-30-0001: Thirty-frame continuous RGB smoke
+
+- Status: **succeeded — thirty-frame Gate 1 PASS**
+- Start/end: 2026-08-01 19:38:39–19:39:14 CST
+- StateGuard3R commit: `c1fd41f13a159f1572518fb0d82dfc4d4f50a505`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
+- Main PID: `525828`; exit code: `0`; GPU: physical index 4
+- Source AVI SHA-256: `1820b52939af2a2e7afdf78f6398cfbc7816399c8809b3836a9ba8da9bef8022`
+- External input manifest: `baselines/ReCal3R/data/tum/derived/fr1_xyz-gate1-30-v1/frame-manifest.json`,
+  SHA-256 `1db34e2f88e7bbb67104dc5bc5dbbfb3b4bebfc5a0b0398b3373dacc5deee041`
+- Checkpoint: `baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth`, 3,173,761,006 bytes,
+  SHA-256 `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`
+- Configuration: CUDA, image size 512, seed 0, base beta 0.1; the hashed `run.json`
+  is the authoritative full argv including all 30 explicit `--image` arguments
+- Log: `logs/gate1-fr1xyz-30-0001.log`, 29,177 bytes, SHA-256
+  `1658e2ec847b1b77f41d9dd4972347e3d449b787041732c2b38b941b28009ac9`
+- Preflight GPU log: `logs/gate1-fr1xyz-30-0001-gpu-preflight.log`, 397 bytes,
+  SHA-256 `ce52af5e972744ffd7cf612cd8bc7f14b886c977692f1e6ad90eb50862ffb177`
+- Postflight GPU log: `logs/gate1-fr1xyz-30-0001-gpu-postflight.log`, 383 bytes,
+  SHA-256 `77ead2adf78bcff0fc84a7504723002635761d9a9d52a2ca22ec51c2e27d2b80`
+- Output: `outputs/gate1-fr1xyz-30-0001`
+
+The launch used the frozen 0–9 paths followed by the incremental 10–29 paths,
+all explicit and ordered. `run.json.input_manifest` is `null` because the v2
+video-frame manifest is provenance rather than a StateGuard3R corruption
+schema; this registry externally binds the run to it. Two earlier interactive
+snapshots and the persisted preflight found GPU 4 at 45,586 MiB free, 0%
+utilization, P8, and no compute PID. `gpustat` was unavailable, so the persisted
+check used `nvidia-smi` GPU, compute-app, and `pmon` views; no process was
+stopped or disturbed.
+
+All 30 frames completed with 29 expected/observed calibrated updates and trace
+steps `[1..29]`. Health, trajectory, prediction, input, and manifest frame IDs
+aligned exactly to 0–29. All JSON numeric values and 180 tensor summaries were
+finite. The first ten health, trajectory, and prediction entries matched the
+independent ten-frame run exactly. Frames 1–29 contained non-null,
+non-constant real signals: geometric residual ranged
+0.00543514–0.01079948, pose jump 0.00945283–0.02580239, uncertainty
+0.79086339–0.80325240, reliability 0.19674760–0.20913661, and
+`global_state_delta` 0.51733727–1.28335999. Reliability, pose-jump, and
+cross-file signal equality independently recomputed within numerical precision.
+
+Inference-scope runtime was 4.440337 seconds, 6.756244 FPS, and peak allocated
+memory was 6,366.722 MiB; the 34.749758-second wall time includes loading.
+At postflight, PID `525828` was absent and GPU 4 was back to 4 MiB with no
+compute process. Checkpoint, source AVI, both manifests, runner, all 30 input
+images, and recorded code provenance hashes remained unchanged.
+
+Output hashes:
+
+```text
+checkpoint-load-audit.json  3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d
+health.jsonl                1169e293c771e4d865ff8dd18e86b084da05d858708d37c571cf25993d45bd80
+predictions-summary.json    5b9a942739d2470666b583a8ce6a9859ad237d4e2eb01b50fc4da4327cf4e7ab
+run.json                    7ccad5540cd0625953204192e663aad9cc2d8480e67264af80228db0fe1dc0c4
+trajectory.json             f83506e6ecf2498e03c332a18a571d7c8833cef8844616acdf29024e6e9f111b
+```
+
+Candidate/final beta, internal `update_magnitude`, local-memory delta,
+overlap, risk/decision, and timestamp remain `null`; the first-frame
+update/reliability fields are null by reference-frame design.
+`run.json.log_path` is also null, so the external log binding above is
+authoritative. The run covers only the first approximately 0.97 seconds of an
+RGB-only video without depth, original TUM timestamps, or GT. It cannot support
+ATE/RPE, long-term stability, formal detection, or quarantine claims. It
+unlocks only the bounded Gate 2 `fr1_desk.tgz` acquisition and smallest smoke;
+it is not a research Go decision.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.

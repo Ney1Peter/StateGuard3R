@@ -376,8 +376,12 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] 30 帧输入已用 CPU/OpenCV 从同一 AVI 顺序复核：0–9 逐像素匹配冻结前缀且只被
       引用，目录内仅新增 10–29 共 20 张只读 PNG；30 帧发布后复核全部逐像素和 SHA，
       AVI 与旧 manifest 哈希不变，无 partial 或重复前缀。
+- [x] `GATE1-FR1XYZ-30-0001` 已完成 30 帧真实连续 RGB forward：恰好 29 次 update、
+      trace `[1..29]`、30 帧有限且对齐，前十帧的 health/trajectory/prediction 与冻结的
+      十帧 run 完全一致；推理段 4.440337 秒，峰值 allocated 显存 6,366.722 MiB，
+      退出后 PID 消失且 GPU 释放。
 - [ ] 更长或带 GT 的 clean baseline、真实 corruption Health Ledger、formal holdout 指标
-      和科研 Go/No-Go 尚无证据。下一步只允许运行已冻结的 30 帧 GPU smoke，328 MiB
-      TGZ、quarantine 和 rollback 继续禁入。
+      和科研 Go/No-Go 尚无证据。下一步只允许 Gate 2 的唯一完整包 `fr1_desk.tgz`，
+      先做最小 8 帧 I/O/forward 门禁；quarantine 和 rollback 继续禁入。
 
 状态更新规则：每完成一个阶段，立即更新本节、运行登记和验证结果；只有满足上一阶段门槛才推进下一阶段。
