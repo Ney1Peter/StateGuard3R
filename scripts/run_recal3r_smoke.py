@@ -596,21 +596,24 @@ def _validate_model_interface(model: Any, checkpoint_name: str) -> dict[str, Any
     if config is None:
         raise RuntimeError("loaded checkpoint model does not expose config")
     expected_head = SUPPORTED_CHECKPOINT_HEADS[checkpoint_name]
-    actual_head = getattr(config, "head_type", None)
+    # ARCroco3DStereo passes a CrocoConfig into its parent constructor, so the
+    # pinned runtime's model.config no longer retains the outer checkpoint head
+    # fields. set_downstream_head freezes those effective fields on the model.
+    actual_head = getattr(model, "head_type", None)
     if actual_head != expected_head:
         raise RuntimeError(
             f"checkpoint {checkpoint_name} loaded head_type={actual_head!r}; "
             f"expected {expected_head!r}"
         )
-    pose_head = getattr(config, "pose_head", None)
+    pose_head = getattr(model, "pose_head_flag", None)
     if pose_head is not True:
         raise RuntimeError(
             f"checkpoint {checkpoint_name} must expose an enabled pose head"
         )
-    output_mode = getattr(config, "output_mode", None)
-    if not isinstance(output_mode, str) or "pose" not in output_mode:
+    output_mode = getattr(model, "output_mode", None)
+    if output_mode != "pts3d+pose":
         raise RuntimeError(
-            f"checkpoint {checkpoint_name} output_mode must include pose, "
+            f"checkpoint {checkpoint_name} output_mode must be 'pts3d+pose', "
             f"got {output_mode!r}"
         )
     downstream_head = getattr(model, "downstream_head", None)
@@ -621,12 +624,27 @@ def _validate_model_interface(model: Any, checkpoint_name: str) -> dict[str, Any
             f"checkpoint {checkpoint_name} loaded downstream head "
             f"{downstream_head_class!r}; expected {expected_head_class!r}"
         )
+    downstream_has_pose = getattr(downstream_head, "has_pose", None)
+    if downstream_has_pose is not True:
+        raise RuntimeError(
+            f"checkpoint {checkpoint_name} downstream head must enable pose"
+        )
+    pose_decoder_present = getattr(downstream_head, "pose_head", None) is not None
+    if not pose_decoder_present:
+        raise RuntimeError(
+            f"checkpoint {checkpoint_name} downstream pose decoder is missing"
+        )
     return {
         "head_type": actual_head,
+        "head_type_source": "model.head_type",
         "downstream_head_class": downstream_head_class,
+        "downstream_has_pose": downstream_has_pose,
         "independent_cross_pointmap": True,
         "pose_head": pose_head,
+        "pose_head_source": "model.pose_head_flag",
+        "pose_decoder_present": pose_decoder_present,
         "output_mode": output_mode,
+        "output_mode_source": "model.output_mode",
     }
 
 
