@@ -772,6 +772,78 @@ ATE/RPE, long-term stability, formal detection, or quarantine claims. It
 unlocks only the bounded Gate 2 `fr1_desk.tgz` acquisition and smallest smoke;
 it is not a research Go decision.
 
+### GATE2-DATA-0001: Official `fr1_desk` TGZ and read-only raw tree
+
+- Status: **download, archive validation, extraction, and independent audit PASS**
+- Time: 2026-08-01 19:59–20:23 CST
+- StateGuard3R base commit: `23f91e382c953f072907b44a0313aaa607400ae6`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Canonical URL: `https://cvg.cit.tum.de/rgbd/dataset/freiburg1/rgbd_dataset_freiburg1_desk.tgz`
+- Final URL: `https://webshare.cvg.cit.tum.de/g/rgbd/dataset/freiburg1/rgbd_dataset_freiburg1_desk.tgz`
+- Archive: `baselines/ReCal3R/data/tum/rgbd_dataset_freiburg1_desk.tgz`,
+  344,011,403 bytes, mode `0444`, SHA-256
+  `e983d6830916e66dc4a46a71368046b149b283de87769690e7aa4e0b9483530c`
+- Raw tree: `baselines/ReCal3R/data/tum/rgbd_dataset_freiburg1_desk`,
+  directories mode `0555`, files mode `0444`
+- Raw manifest: `baselines/ReCal3R/logs/gate2-fr1-desk-raw-manifest.json`,
+  231,139 bytes, SHA-256
+  `5908db0f357fd4a21b2c777220de38e651b48b80c7d53182123c6eb4e7163d87`
+
+A `/data/wangzheng` filename search found no existing archive or partial. The
+pre-download filesystem snapshot had 342,318,374,912 bytes free. A fresh HEAD
+returned the expected 302/200 redirect, `Content-Length: 344011403`, byte-range
+support, 2011-09-30 Last-Modified, and ETag. Only this planned TGZ was downloaded
+to a same-directory `.part`; curl completed 344,011,403 bytes in 720.696681
+seconds before any publication. No `fr1_xyz` TGZ, `fr1_desk` AVI, standalone
+GT, fr2/fr3 sequence, or other dataset was acquired.
+
+While still partial, exact size, `gzip -t`, gzip listing, local SHA-256, and a
+Python tar-member audit passed. The tar stream is 368,220,160 bytes and has
+exactly 1,215 members: three directories and 1,212 regular files totaling
+367,285,514 bytes. It has one expected top-level directory, no duplicate,
+absolute, parent-traversal, link, or special member, and contains 613 RGB PNGs,
+595 depth PNGs, `rgb.txt`, `depth.txt`, `groundtruth.txt`, and the official
+`accelerometer.txt`. The TGZ was set to `0444`, atomically renamed, then audited
+again with the same hash. TUM publishes no cryptographic checksum; the SHA above
+is this project's first-download identity, not an official authenticity claim.
+
+Extraction used a unique same-filesystem staging directory. All archive members
+were first checked in staging, all 1,212 files were hashed, and every RGB image
+decoded as 480x640x3 `uint8`; every depth image decoded as 480x640 `uint16`.
+`rgb.txt` and `depth.txt` contain 613 and 595 strictly ordered timestamp/path
+rows matching the image files; `groundtruth.txt` contains 2,335 finite
+eight-field poses with ordered timestamps and unit quaternions. The raw manifest
+was regenerated after publication and matched its pre-publication bytes exactly.
+
+The first directory-publication attempt was deliberately stopped when moving a
+staged root already set to `0555` returned permission denied. The final target
+was still absent. The same fully audited staging root alone was temporarily set
+to `0755` for the parent-changing atomic rename, immediately restored to `0555`,
+and fully re-audited; no re-extraction, overwrite, or half-published target
+occurred. The extract log preserves both attempts. No `.part`, staging,
+symlink, hardlink, or temporary manifest remains, and both Git tracked trees
+are clean. This entire gate was CPU/storage-only and used no GPU.
+
+Read-only audit hashes:
+
+```text
+gate2-fr1-desk-tgz-headers.txt             5be3bec9136a1068f0c71975f7421b73ce4e008bab4898a9c3b6693227ee2b5b
+gate2-fr1-desk-tgz-download.log            7023c17c78e10a7195fffa89c67ae1a021fa42b3f3c960630b210c1bea55d7a8
+gate2-fr1-desk-tgz-audit.py                1e7b35bab4e1fb348f82c9686e73f3c688c75e5def36741aeb8da96253246e91
+gate2-fr1-desk-tgz-file.txt                ce9bf79350499d6042f49f24f12619dcd5899aa7caf53f6ffc185e3f6f3653cc
+gate2-fr1-desk-tgz-gzip.txt                b29edcf2149514f47f8e6dcf796ea308538190c0c098d9c381ef4eacb20edc97
+gate2-fr1-desk-tgz-tar-audit.json          cc332a0188e3173f0fdfca11af91f58040f5621fcb649cfde5c08975bd3e0f5b
+gate2-fr1-desk-tgz-postpublish-audit.json  da2425c79c5765ea0e9777df0043334b6e593c833ee09ac7f7db3acffce20405
+gate2-fr1-desk-extraction-audit.py         9d1b175af46bf3045613ad01af4c21caaa788c5526600caf8235e3e20990ad95
+gate2-fr1-desk-extract.log                 7adfc412c370a5e2281249c6a259e9c1ae17635148f0a55ceb580691577bf21a
+```
+
+This PASS proves archive/raw-layout integrity and unlocks only the smallest
+eight-frame I/O/forward gate. It is not an inference, pose-accuracy, health,
+detection, or research result. The raw tree remains untouched; any future
+continuous-window manifest must live under the writable sibling `derived/`
+and reference the raw files without copying them.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
