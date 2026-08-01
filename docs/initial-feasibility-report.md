@@ -1,8 +1,8 @@
 # StateGuard3R 初步可行性报告
 
 - 日期：2026-08-01
-- 证据截止时间：2026-08-01 21:41 CST
-- StateGuard3R 证据快照：`e326be3acb19f1a92147747f6de4e4802b8c43dc`
+- 证据截止时间：2026-08-01 22:09 CST
+- StateGuard3R 证据快照：`bdcd73cd8197abe73604b21c6142c96ecdbfb514`
 - ReCal3R 固定上游：`466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
 - 当前结论：**HOLD — evidence pending**
 
@@ -235,16 +235,16 @@ finite；推理段 1.348210 秒，峰值 allocated 显存 6,367.173 MiB。它证
 | Gate 2 连续八帧输入准备 | **PASS** | 最早有效 0-based RGB 数据索引 17–24（物理行 21–28）；depth/GT ≤20 ms，只引用 raw 文件 |
 | Gate 2 连续八帧 I/O/forward | **PASS** | 7 次 update/trace、48 个 finite summaries、真实 health、哈希和 GPU 释放通过 |
 | Gate 2 连续三十帧输入准备 | **PASS** | 索引 17–46；depth/GT 唯一关联，前八帧为精确前缀，只新增只读引用 manifest |
-| Gate 2 连续三十帧 clean ledger | **NEXT / UNLOCKED** | 从 clean commit 运行；通过前 50 帧与 corruption formal 仍锁定 |
-| 真实三类 corruption Health Ledger | **LOCKED** | 依赖更长 clean baseline；不得用十帧或 synthetic ledger 顶替 |
+| Gate 2 连续三十帧 clean ledger | **PASS** | 29 次 update/trace、180 summaries finite；前八帧输出精确复现，GPU/PID 释放 |
+| 真实三类 corruption Health Ledger | **NEXT / EXPLORATORY ONLY** | 只在同一冻结 30 帧来源上做每类最小 smoke；不是 formal detection |
 | 正式 development/holdout detection | **LOCKED** | 尚无真实日志与冻结开发集配置，不能检验 AUROC > 0.75 等 Go 条件 |
 | Phase 5 科研决策 | **HOLD — evidence pending** | 证据不足，既非 Go 也非方法 No-Go |
 | Quarantine/rollback | **LOCKED；当前禁止进入** | 仅在真实 formal detection 满足预设 Go gate 后才可开始 |
 
 checkpoint、GPU、两图 Gate 0、四帧机械 gate、十帧和 30 帧 GPU smoke 均已通过。
-唯一的 `fr1_desk.tgz`、raw tree、八帧 forward 和连续 30 帧引用输入也已通过各自
-门禁。当前只能运行同一序列连续 30 帧 clean ledger；不得把输入可读性或八帧 RGB
-forward 升级为 ATE/RPE、detection 或科研 Go。
+唯一的 `fr1_desk.tgz`、raw tree、八帧 forward、连续 30 帧引用输入和 clean ledger
+也已通过各自门禁。当前只能在同一冻结来源上准备三类最小 exploratory corruption
+smoke；不得把不足一秒的 RGB ledger 升级为 ATE/RPE、formal detection 或科研 Go。
 
 ### 3.3 严格解阻顺序
 
@@ -260,10 +260,11 @@ forward 升级为 ATE/RPE、detection 或科研 Go。
 5. **已完成：**Gate 1 下载、十帧 GPU smoke、30 帧增量输入与 30 帧 GPU smoke 均通过；
    30 帧 run 有 29 次 update、180 个 finite tensor summaries，并已验证进程/GPU 释放。
    AVI 仅用于连续推理，不报告 ATE/RPE。
-6. **进行中：**唯一完整包 `fr1_desk.tgz`（328.07 MiB）的下载、raw 解压、连续八帧
-   引用 manifest/forward 和连续 30 帧引用 manifest 均已通过；下一步只运行该 30 帧
-   clean ledger，通过后才评估 50 帧或 corruption smoke，最后才考虑完整 clean
-   baseline。原始数据保持只读，不运行会大量复制图片的 TUM long preprocessing 脚本。
+6. **已完成：**唯一完整包 `fr1_desk.tgz`（328.07 MiB）的下载、raw 解压、连续八帧
+   引用 manifest/forward、连续 30 帧引用 manifest 和 clean ledger 均已通过。下一步
+   只在相同 30 帧来源上准备并分别运行三类最小 exploratory corruption smoke；不自动
+   扩到 50 帧。原始数据保持只读，不运行会大量复制图片的 TUM long preprocessing
+   脚本。
 7. 在真实序列上划分 development/holdout，先冻结 window、epsilon、max-z、seed 和四方法
    阈值，再运行三类 corruption 的 formal detection，报告真实分组与总体 AUROC、F1、
    FPR、delay、timeline、runtime 和 memory；不得用 holdout 反复调参。
@@ -273,8 +274,7 @@ forward 升级为 ATE/RPE、detection 或科研 Go。
    quarantine/rollback。
 
 综上，当前最积极且严谨的结论是：软件与可复现管线已具备继续实验的基础，真实
-ReCal3R 两图 Gate 0、四帧机械 gate、Gate 1 十帧/30 帧和 Gate 2 八帧 smoke 已通过，
-但 Gate 2 连续 30 帧 clean、corruption detection 和 holdout 核心证据仍不足。
-**决定维持 HOLD — evidence pending；下一步只运行已冻结的
-`fr1_desk` 连续 30 帧 clean ledger，50 帧、formal detection 与 quarantine/rollback
-继续禁止。**
+ReCal3R 两图 Gate 0、四帧机械 gate、Gate 1 十帧/30 帧以及 Gate 2 八帧/30 帧 clean
+smoke 已通过，但真实 corruption detection 和 holdout 核心证据仍不足。**决定维持
+HOLD — evidence pending；下一步只推进同一冻结 30 帧来源上的三类最小 exploratory
+corruption smoke，50 帧、formal detection 与 quarantine/rollback 继续禁止。**

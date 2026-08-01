@@ -1008,6 +1008,77 @@ the prepared input cannot support ATE/RPE, depth metrics, detection, long-term
 stability, or a research Go. The 50-frame, formal corruption/detection, and
 quarantine gates remain locked.
 
+### GATE2-FR1DESK-30-0001: Thirty-frame contiguous raw-TUM clean ledger
+
+- Status: **succeeded — Gate 2 30-frame clean ledger PASS**
+- Start/end: 2026-08-01 21:59:17–21:59:45 CST
+- StateGuard3R commit: `bdcd73cd8197abe73604b21c6142c96ecdbfb514`
+- ReCal3R commit: `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
+- Runner SHA-256: `091ac783fb3eae62ea3835e58c3e3f56fd32b2306477ba158a8ba722abc8a40e`
+- Main PID: `1315129`; exit code: `0`; GPU: physical index 4
+- External window manifest: `baselines/ReCal3R/data/tum/derived/fr1_desk-gate2-30-v1/window-manifest.json`,
+  SHA-256 `8c7ade9ee01d22ebd895e034f46130aa8c6d834a80b3e24d2b5a5ca1a2b08575`
+- Parent eight-frame manifest SHA-256:
+  `24548d1110af58ca5599bba5737396b8c4b96478b6a4d4f137cc832ae55e9e35`
+- Raw-manifest SHA-256: `5908db0f357fd4a21b2c777220de38e651b48b80c7d53182123c6eb4e7163d87`
+- TGZ SHA-256: `e983d6830916e66dc4a46a71368046b149b283de87769690e7aa4e0b9483530c`
+- Checkpoint: `baselines/ReCal3R/src/cut3r_512_dpt_4_64.pth`, 3,173,761,006 bytes,
+  SHA-256 `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`
+- Configuration: CUDA, image size 512, seed 0, base beta 0.1; the hashed
+  `run.json` is the authoritative argv with 30 explicit ordered `--image` paths
+- Log: `logs/gate2-fr1desk-30-0001.log`, 30,244 bytes, SHA-256
+  `bdfbac7b045a073c48d1555e3b2297819b7d970d7ae95c17cdfa5879368f7e46`
+- Preflight GPU log: `logs/gate2-fr1desk-30-0001-gpu-preflight.log`, 14,593 bytes,
+  SHA-256 `84b64af82b450d629e54428bd77f0b630ba9968012c21d0f728eaa73db00f286`
+- Postflight GPU log: `logs/gate2-fr1desk-30-0001-gpu-postflight.log`, 7,225 bytes,
+  SHA-256 `640c45d601f5a30c10583458298e3c762d1065ee7663f3752965f3be676e5f90`
+- Output: `outputs/gate2-fr1desk-30-0001`
+
+The manifest's 30 raw RGB paths were passed explicitly in order. Both tracked
+trees were clean, and the runner recorded that code and input hashes matched
+the frozen values. Two persisted preflight snapshots found GPU 4 at 4 MiB
+used, 45,586 MiB free, 0% utilization, P8, and without a compute PID;
+`gpustat` was unavailable, so full `nvidia-smi`, GPU, compute-app, and `pmon`
+views were retained. No process was stopped or disturbed.
+
+All 30 frames completed with 29 expected/observed calibrated updates and trace
+steps `[1..29]`. Health, trajectory, prediction, image, and input-frame IDs
+aligned exactly to 0–29; all JSON numbers and all 180 tensor summaries were
+finite. Across the available frames, geometric residual ranged
+0.01146577–0.01876780, pose jump 0.01803411–0.05329814, uncertainty
+0.77685690–0.81150341, reliability 0.18849659–0.22314310, and
+`global_state_delta` 0.97143427–1.32416431. Reliability bounds, pose-jump
+composition, and cross-file signal equality were independently recomputed.
+The first eight health objects, trajectory frames/metadata, prediction
+summaries, images, and input-frame records exactly equal the independent
+eight-frame run, confirming deterministic prefix behavior.
+
+Inference-scope runtime was 3.419778 seconds, 8.772500 FPS, and peak allocated
+memory was 6,365.548 MiB. The recorded post-validation runner interval was
+28.159521 seconds. Postflight found PID `1315129` absent and GPU 4 at 4 MiB
+with no compute PID; a later audit found it at 45,586 MiB free, 0%, P8.
+
+Output hashes:
+
+```text
+checkpoint-load-audit.json  3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d
+health.jsonl                0438de6108831b6bc3d0b911d47763e73e7a4b81730577bb73479bd60b5aa6bb
+predictions-summary.json    29a88e0d10d09a8a28c2eda232c134767c7b2c8b28b94129df0c98236afd0b5b
+run.json                    425ec6a01d486f228895d1cef711e2c5a0f09f7e4e3dad4d064da5e7f053d9cc
+trajectory.json             bfc3389e00c538e950b81670f239580ea1c2a354abadca80ea7963616c2d41e8
+```
+
+`run.json.input_manifest`, `log_path`, and per-frame timestamp remain `null`;
+the registry therefore externally binds the window and logs. Runner source
+indices 0–29 are local and correspond to raw TUM indices 17–46. Depth/GT did
+not enter forward, and overlap, internal `update_magnitude`, candidate/final
+beta, local-memory delta, and risk/decision remain unavailable. This result is
+only a deterministic, approximately 0.968-second RGB recurrent smoke: it
+cannot support ATE/RPE, a depth metric, long-term stability, formal detection,
+quarantine, or a research Go. It unlocks only preparation and separate
+exploratory smokes for the three planned corruptions on the same frozen source;
+the 50-frame and formal gates remain locked.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
