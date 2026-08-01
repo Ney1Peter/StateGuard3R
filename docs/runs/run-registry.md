@@ -564,6 +564,50 @@ local-memory delta remained `null`; only `global_state_delta` was measured.
 `run.json.log_path` is also `null`, so the external log path and hash above are
 the binding log record.
 
+### GATE1-DATA-0001: Official TUM `fr1_xyz` AVI and ten-frame prefix
+
+- Status: **download and CPU prefix-decode PASS; GPU smoke not yet run**
+- Time: 2026-08-01 18:34–18:38 CST
+- Canonical URL: `https://cvg.cit.tum.de/rgbd/dataset/freiburg1/rgbd_dataset_freiburg1_xyz-rgb.avi`
+- Final official redirect: `https://webshare.cvg.cit.tum.de/g/rgbd/dataset/freiburg1/rgbd_dataset_freiburg1_xyz-rgb.avi`
+- Download target: `baselines/ReCal3R/data/tum/rgbd_dataset_freiburg1_xyz-rgb.avi`
+- Size: 8,059,298 bytes; mode `0444`; no remaining `.part`
+- SHA-256: `1820b52939af2a2e7afdf78f6398cfbc7816399c8809b3836a9ba8da9bef8022`
+- Derived prefix: `baselines/ReCal3R/data/tum/derived/fr1_xyz-gate1-10-v1`
+- Frame manifest SHA-256: `1905a62ea7aa4285c2607a009540ada2844490c279b0daea50dd5260028e6b7e`
+- Derived size: about 4.1 MiB; ten PNGs and the manifest are mode `0444`
+
+A bounded official HEAD check returned one 302 followed by HTTP 200 with
+`Content-Length: 8059298`, `Content-Type: video/x-msvideo`,
+`Last-Modified: Thu, 29 Sep 2011 14:32:22 GMT`, and ETag
+`"7af9a2-4ae15606ac980"`. `curl --fail --location --continue-at -` wrote only
+the `.part` path; the received size matched exactly before atomic rename.
+RIFF/AVI magic, `file`, and `ffprobe` passed. The stream is MPEG-4/FMP4,
+640x480, 30 FPS, 26.6 seconds, and reports 798 frames.
+
+With CUDA hidden, ReCal3R's isolated Python and OpenCV 4.11 sequentially read
+indices 0 through 9. Every decoded frame was `480x640x3 uint8`; each was saved
+once as a read-only PNG. The manifest records every path, byte size, SHA-256,
+shape, dtype, OpenCV version, source hash, and nominal `frame_index/fps` time.
+That nominal time is explicitly not an original TUM timestamp. Source AVI
+SHA-256 was unchanged after decoding.
+
+Read-only audit logs and SHA-256 values:
+
+```text
+gate1-fr1-xyz-avi-headers.txt   a3c40eea2745ecc4f6b2e0455dd8d1f4785a88ba9a1bbe5548ac15dd7f1bd9d4
+gate1-fr1-xyz-avi-download.log  2bc6bff8ec828eb798c4538e4d8e4fce43ccf0393a5dfb5ea8dfdcbaf04c6360
+gate1-fr1-xyz-avi-file.txt      b86a4c9ac1beac91b30799522e742c720df27371d165be2f10d463479b36b9ff
+gate1-fr1-xyz-avi-ffprobe.txt   002248e507346c0fcba915ad4c884c4b1afaf353d6616c05bc4d1dac55bb533b
+gate1-fr1-xyz-decode10.log      0f8e7787f2d79a36f69c2392c4184b1dc99a5af09ad4c398eaef698747757c12
+```
+
+This AVI has no original RGB/depth association files, timestamps, or
+ground-truth trajectory. It is only a continuous RGB smoke input and cannot
+support ATE/RPE or a formal research conclusion. The next gate is a ten-frame
+GPU run with exactly nine updates; neither the 30-frame expansion nor the TUM
+TGZ is unlocked yet.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.

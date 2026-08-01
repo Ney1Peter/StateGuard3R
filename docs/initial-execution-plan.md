@@ -366,8 +366,11 @@ No-Go 时停止实现 rollback，转为修订 corruption、信号定义，或降
 - [x] `GATE0-STATE4-0001` 已用现有官方资产的四个只读引用通过机械 state smoke：
       `N-1=3` updates、trace `[1,2,3]`、四帧有限输出和混合宽高比均通过；峰值 allocated
       显存 6,367.173 MiB。该序列不是连续真实场景，只解除 7.69 MiB TUM AVI Gate 1。
+- [x] Gate 1 官方 `fr1_xyz` RGB AVI 已按 `.part`→精确字节/RIFF/ffprobe/SHA 校验→
+      原子改名取得：8,059,298 bytes，SHA-256 `1820b529…f8022`，只读且无 partial。
+      CPU/OpenCV 已顺序解码连续索引 `0..9` 为十张只读 PNG，源 AVI 哈希保持不变。
 - [ ] 真实连续 clean/corruption Health Ledger、formal holdout 指标和科研 Go/No-Go
-      尚无证据。当前允许 Gate 1 的约 10 帧后约 30 帧 smoke；328 MiB TGZ、quarantine
-      和 rollback 继续禁入。
+      尚无证据。下一步只允许 Gate 1 十帧 GPU smoke；通过后才扩约 30 帧，328 MiB
+      TGZ、quarantine 和 rollback 继续禁入。
 
 状态更新规则：每完成一个阶段，立即更新本节、运行登记和验证结果；只有满足上一阶段门槛才推进下一阶段。
