@@ -412,7 +412,10 @@ def _validate_groundtruth(root: Path) -> dict[str, Any]:
     for line_number, fields in _data_lines(path):
         _require(len(fields) == 8, f"groundtruth line {line_number} must have eight fields")
         timestamp = _decimal_timestamp(fields[0], label="groundtruth")
-        _require(not timestamps or timestamp > timestamps[-1], "groundtruth timestamps are not increasing")
+        _require(
+            not timestamps or timestamp >= timestamps[-1],
+            "groundtruth timestamps are decreasing",
+        )
         try:
             values = [float(value) for value in fields[1:]]
         except ValueError as error:
@@ -422,7 +425,14 @@ def _validate_groundtruth(root: Path) -> dict[str, Any]:
         _require(abs(quaternion_norm - 1.0) <= 0.02, f"groundtruth quaternion is not normalized at line {line_number}")
         timestamps.append(timestamp)
     _require(len(timestamps) >= 30, "groundtruth has fewer than 30 poses")
-    return {"rows": len(timestamps), "first_timestamp": str(timestamps[0]), "last_timestamp": str(timestamps[-1])}
+    return {
+        "rows": len(timestamps),
+        "first_timestamp": str(timestamps[0]),
+        "last_timestamp": str(timestamps[-1]),
+        "duplicate_timestamp_count": sum(
+            left == right for left, right in zip(timestamps, timestamps[1:])
+        ),
+    }
 
 
 def _nearest_distance(reference: Decimal, targets: Sequence[Decimal]) -> Decimal:
@@ -483,16 +493,31 @@ def preflight(output_dir: Path) -> dict[str, Any]:
 def acquire(preflight_dir: Path, output_dir: Path) -> dict[str, Any]:
     output_dir = _assert_output_path(output_dir)
     preflight_record = _read_preflight(preflight_dir)
-    _assert_target_absent(permit_part=True)
+    _require(not _raw_path().exists(), f"holdout raw target already exists: {_raw_path()}")
+    for path in TUM_ROOT.glob(f".{DATASET_NAME}.formal-v2-staging-*"):
+        raise AcquisitionError(f"unfinished holdout staging directory exists: {path}")
     _require(shutil.disk_usage(TUM_ROOT).free >= MINIMUM_DATA_BUDGET_BYTES, "insufficient disk space before download")
     TUM_ROOT.mkdir(parents=True, exist_ok=True)
-    download = _download_resume()
-    part = _part_path()
-    archive_validation = _validate_archive(part)
-    archive_sha256 = _sha256(part)
     archive = _archive_path()
-    os.replace(part, archive)
-    archive.chmod(0o444)
+    if archive.exists():
+        _require(archive.is_file(), f"existing archive is not a regular file: {archive}")
+        _require(not _part_path().exists(), "archive and .part both exist")
+        _require(
+            archive.stat().st_size == EXPECTED_ARCHIVE_BYTES,
+            "existing archive size differs from the predeclared candidate",
+        )
+        download = {
+            "canonical_url": CANONICAL_URL,
+            "reused_verified_archive": True,
+            "final_bytes": archive.stat().st_size,
+        }
+    else:
+        download = _download_resume()
+        part = _part_path()
+        os.replace(part, archive)
+        archive.chmod(0o444)
+    archive_validation = _validate_archive(archive)
+    archive_sha256 = _sha256(archive)
     staging_parent, staged_root = _extract_to_staging(archive)
     try:
         raw_manifest = _tree_manifest(staged_root)
