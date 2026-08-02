@@ -10,6 +10,7 @@ from scripts.acquire_tum_v2_holdout import (
     DATASET_NAME,
     _safe_member,
     _tree_manifest,
+    _validate_groundtruth,
     _validate_archive,
 )
 
@@ -83,3 +84,15 @@ def test_archive_validation_requires_expected_tum_members(tmp_path: Path) -> Non
     report = _validate_archive(archive)
 
     assert report["required_entries_present"] == ["depth", "depth.txt", "groundtruth.txt", "rgb", "rgb.txt"]
+
+
+def test_groundtruth_allows_duplicate_timestamp_but_reports_it(tmp_path: Path) -> None:
+    root = _raw_tree(tmp_path)
+    lines = (root / "groundtruth.txt").read_text(encoding="utf-8").splitlines()
+    lines[1] = lines[0]
+    (root / "groundtruth.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    report = _validate_groundtruth(root)
+
+    assert report["rows"] == 30
+    assert report["duplicate_timestamp_count"] == 1
