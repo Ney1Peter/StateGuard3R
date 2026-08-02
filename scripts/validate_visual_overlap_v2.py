@@ -520,6 +520,9 @@ def run_visual_overlap_replay(
     if runner_module is None:
         if str(baseline_root) not in sys.path:
             sys.path.insert(0, str(baseline_root))
+        baseline_src = baseline_root / "src"
+        if str(baseline_src) not in sys.path:
+            sys.path.insert(0, str(baseline_src))
         from scripts import run_recal3r_smoke as imported_runner
 
         runner_module = imported_runner
