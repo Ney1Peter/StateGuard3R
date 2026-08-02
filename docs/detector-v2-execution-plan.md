@@ -706,5 +706,7 @@ formal commitment 后至唯一 evaluate 完成前，不允许任何 tracked comm
   quarantine proxy completed with decision
   `EXPLORATORY_PROXY_ONLY_NO_ROLLBACK`. It does not support recovery or
   rollback claims.
-- [ ] Phase 12: final full-suite verification, documentation commit, artifact
-  permission/process cleanup, and goal close-out remain.
+- [x] Phase 12: full-suite verification, documentation commits, artifact
+  permission/process cleanup, and goal close-out completed. Rebuildable pytest
+  fixtures remain in the project-local `tmp/` because direct deletion was
+  blocked by the execution environment; no formal evidence was removed.
