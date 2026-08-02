@@ -23,7 +23,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 
 PROJECT_ROOT = Path("/data/wangzheng/Project2")
@@ -72,6 +72,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--size", choices=(224, 512), default=512, type=int)
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--beta-base", default=0.1, type=float)
+    parser.add_argument(
+        "--health-profile",
+        choices=("v1", "v2"),
+        default="v1",
+        help=(
+            "health instrumentation profile; v1 preserves the legacy path, "
+            "while v2 adds causal visual correspondence before inference"
+        ),
+    )
     return parser
 
 
@@ -400,6 +409,106 @@ def _prepare_input_views(args: argparse.Namespace, torch: Any) -> list[dict[str,
         torch,
     )
     return apply_deferred_transforms(loaded, manifest)
+
+
+def _health_profile(args: argparse.Namespace) -> str:
+    """Resolve the legacy default even for older direct test namespaces."""
+
+    profile = getattr(args, "health_profile", "v1")
+    if profile not in {"v1", "v2"}:
+        raise RuntimeError(f"unsupported health profile {profile!r}")
+    return profile
+
+
+def _model_ready_rgb_sha256(image: Any) -> str:
+    """Hash a copied RGB projection without sharing or mutating model storage."""
+
+    from stateguard3r.visual_overlap import normalized_tensor_to_uint8_rgb
+
+    return hashlib.sha256(normalized_tensor_to_uint8_rgb(image).tobytes()).hexdigest()
+
+
+def _v2_online_visual_overlap(
+    views: Sequence[Mapping[str, Any]],
+    *,
+    series_function: Any | None = None,
+    provenance_function: Any | None = None,
+) -> tuple[list[float | None], dict[str, Any]]:
+    """Compute v2 overlap from consecutive prepared RGB views before inference.
+
+    This helper is reached only from the explicit v2 profile.  It imports
+    OpenCV-backed code lazily, hashes copied uint8 projections before and after
+    scoring, and never mutates a view or accepts depth/GT/labels.
+    """
+
+    from stateguard3r.visual_overlap import (
+        SCHEMA_VERSION as VISUAL_OVERLAP_SCHEMA_VERSION,
+        VisualOverlapConfig,
+        VisualOverlapResult,
+        online_visual_correspondence_series,
+        opencv_runtime_provenance,
+    )
+
+    if not views:
+        raise RuntimeError("v2 visual overlap requires at least one prepared view")
+    images: list[Any] = []
+    for index, view in enumerate(views):
+        if not isinstance(view, Mapping) or "img" not in view:
+            raise RuntimeError(f"v2 prepared view {index} lacks img")
+        images.append(view["img"])
+    before = [_model_ready_rgb_sha256(image) for image in images]
+    series = (online_visual_correspondence_series if series_function is None else series_function)(
+        images,
+        config=VisualOverlapConfig(),
+    )
+    after = [_model_ready_rgb_sha256(image) for image in images]
+    if before != after:
+        raise RuntimeError("v2 visual overlap modified a prepared model input")
+    if len(series) != len(images) or series[0] is not None:
+        raise RuntimeError("v2 visual overlap requires null frame zero")
+    overlaps: list[float | None] = [None]
+    diagnostics: list[dict[str, Any]] = []
+    for frame_id, result in enumerate(series[1:], start=1):
+        if not isinstance(result, VisualOverlapResult):
+            raise RuntimeError(f"v2 overlap frame {frame_id} did not return a result")
+        if result.reference_frame_id not in {None, frame_id - 1} or result.frame_id not in {
+            None,
+            frame_id,
+        }:
+            raise RuntimeError(f"v2 overlap frame {frame_id} has non-causal IDs")
+        if not math.isfinite(result.score) or not 0.0 <= result.score <= 1.0:
+            raise RuntimeError(f"v2 overlap frame {frame_id} is not finite in [0, 1]")
+        overlaps.append(float(result.score))
+        diagnostics.append(result.to_dict())
+    provenance = (
+        opencv_runtime_provenance if provenance_function is None else provenance_function
+    )()
+    return overlaps, {
+        "schema_version": VISUAL_OVERLAP_SCHEMA_VERSION,
+        "input": "post_official_loader_post_deferred_transform_normalized_rgb",
+        "causal_reference": "immediately_previous_frame_only",
+        "model_ready_uint8_rgb_sha256": before,
+        "frame_results": diagnostics,
+        "opencv": provenance,
+    }
+
+
+def _apply_v2_overlap_to_health(
+    health: Sequence[Any], overlaps: Sequence[float | None]
+) -> list[Any]:
+    """Copy health frames with the already-computed causal overlap values."""
+
+    if len(health) != len(overlaps) or not health:
+        raise RuntimeError("v2 health/overlap alignment is invalid")
+    output: list[Any] = []
+    for frame_id, (record, overlap) in enumerate(zip(health, overlaps, strict=True)):
+        if frame_id == 0:
+            if overlap is not None:
+                raise RuntimeError("v2 overlap frame zero must be null")
+        elif not isinstance(overlap, float) or not math.isfinite(overlap) or not 0.0 <= overlap <= 1.0:
+            raise RuntimeError(f"v2 overlap frame {frame_id} must be finite in [0, 1]")
+        output.append(replace(record, overlap=overlap))
+    return output
 
 
 def _verify_preflight_inputs(args: argparse.Namespace) -> None:
@@ -864,6 +973,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     _validate_args(args, parser)
+    health_profile = _health_profile(args)
     runner_provenance = _runner_provenance(args.baseline_root)
     run_started_at = datetime.now().astimezone().isoformat()
 
@@ -946,6 +1056,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     _verify_preflight_inputs(args)
     views = _prepare_input_views(args, torch)
+    v2_overlaps: list[float | None] | None = None
+    v2_visual_metadata: dict[str, Any] | None = None
+    if health_profile == "v2":
+        visual_started = time.perf_counter()
+        v2_overlaps, v2_visual_metadata = _v2_online_visual_overlap(views)
+        v2_visual_metadata["runtime_seconds"] = time.perf_counter() - visual_started
     args.output_dir.mkdir(parents=True, exist_ok=False)
 
     model, checkpoint_state_dict = _load_model_with_state_dict_audit(
@@ -1057,6 +1173,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for index, record in enumerate(health)
     ]
+    if health_profile == "v2":
+        if v2_overlaps is None or v2_visual_metadata is None:
+            raise RuntimeError("v2 visual overlap instrumentation is unavailable")
+        health = _apply_v2_overlap_to_health(health, v2_overlaps)
 
     _verify_preflight_inputs(args)
     write_health_jsonl_atomic(args.output_dir / "health.jsonl", health)
@@ -1150,6 +1270,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "torch_version": torch.__version__,
         "cuda_runtime": torch.version.cuda,
     }
+    if health_profile == "v2":
+        metadata["health_profile"] = "v2"
+        metadata["online_visual_correspondence"] = v2_visual_metadata
     _write_json_atomic(args.output_dir / "run.json", metadata)
     print(json.dumps(metadata, ensure_ascii=False, indent=2, allow_nan=False))
     return 0
