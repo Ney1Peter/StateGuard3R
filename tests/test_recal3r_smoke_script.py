@@ -22,8 +22,10 @@ from scripts.run_recal3r_smoke import (
     _load_model_with_state_dict_audit,
     _output_health_signals,
     _parser,
+    _apply_v2_overlap_to_health,
     _prepare_input_views,
     _runner_provenance,
+    _v2_online_visual_overlap,
     _validate_args,
     _validate_model_interface,
     _verify_preflight_inputs,
@@ -31,6 +33,8 @@ from scripts.run_recal3r_smoke import (
 )
 from stateguard3r.corruption import generate_corruption_manifest
 from stateguard3r.input_manifest import load_input_manifest
+from stateguard3r.health import HealthFrame
+from stateguard3r.visual_overlap import VisualOverlapResult
 
 
 BASELINE = Path("/data/wangzheng/Project2/baselines/ReCal3R")
@@ -67,6 +71,70 @@ def test_static_validation_freezes_clean_official_baseline(tmp_path: Path) -> No
     assert args.checkpoint_size_bytes == len(b"not-loaded-by-static-validation")
     assert all(path.is_absolute() for path in args.image)
     assert not args.output_dir.exists()
+
+
+def test_v2_profile_is_explicit_and_copies_causal_overlap_without_view_mutation() -> None:
+    parser = _parser()
+    assert parser.get_default("health_profile") == "v1"
+
+    views = [
+        {"img": np.full((1, 3, 8, 10), value, dtype=np.float32)}
+        for value in (-0.4, 0.0, 0.4)
+    ]
+    before = [view["img"].copy() for view in views]
+
+    def fake_series(images, *, config):
+        assert config.nfeatures == 2000
+        assert len(images) == len(views)
+        assert all(
+            np.array_equal(image, view["img"]) for image, view in zip(images, views)
+        )
+        return [
+            None,
+            VisualOverlapResult(
+                score=0.25,
+                status="ok",
+                keypoints_previous=12,
+                keypoints_current=12,
+                ratio_matches=12,
+                mutual_matches=12,
+                inliers=12,
+                inlier_ratio=1.0,
+                previous_grid_coverage=0.25,
+                current_grid_coverage=0.25,
+                reference_frame_id=0,
+                frame_id=1,
+            ),
+            VisualOverlapResult(
+                score=0.5,
+                status="ok",
+                keypoints_previous=12,
+                keypoints_current=12,
+                ratio_matches=12,
+                mutual_matches=12,
+                inliers=12,
+                inlier_ratio=1.0,
+                previous_grid_coverage=0.5,
+                current_grid_coverage=0.5,
+                reference_frame_id=1,
+                frame_id=2,
+            ),
+        ]
+
+    overlaps, metadata = _v2_online_visual_overlap(
+        views,
+        series_function=fake_series,
+        provenance_function=lambda: {"threads": 1, "opencl_enabled": False},
+    )
+
+    assert overlaps == [None, 0.25, 0.5]
+    assert metadata["input"] == "post_official_loader_post_deferred_transform_normalized_rgb"
+    assert len(metadata["model_ready_uint8_rgb_sha256"]) == 3
+    assert all(np.array_equal(view["img"], original) for view, original in zip(views, before))
+    health = [HealthFrame(frame_id=index) for index in range(3)]
+    enriched = _apply_v2_overlap_to_health(health, overlaps)
+    assert [record.overlap for record in health] == [None, None, None]
+    assert [record.overlap for record in enriched] == overlaps
 
 
 def test_cuda_validation_requires_one_explicit_visible_gpu(
