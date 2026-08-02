@@ -11,6 +11,7 @@ from stateguard3r.visual_overlap import (
     normalized_tensor_to_uint8_rgb,
     online_visual_correspondence_coverage,
     online_visual_correspondence_series,
+    opencv_runtime_provenance,
 )
 
 
@@ -82,6 +83,12 @@ class _FakeCV2:
 
     def setRNGSeed(self, seed: int) -> None:
         self.rng_seed = seed
+
+    def getNumThreads(self) -> int:
+        return self.threads
+
+    def getBuildInformation(self) -> str:
+        return "synthetic OpenCV build"
 
     def ORB_create(self, *, nfeatures: int) -> _ORB:
         assert nfeatures == 2000
@@ -218,3 +225,23 @@ def test_visual_overlap_rejects_nonfinite_or_non_normalized_model_input() -> Non
         normalized_tensor_to_uint8_rgb(np.full((3, 2, 2), 2.0))
     with pytest.raises(VisualOverlapError, match="finite"):
         normalized_tensor_to_uint8_rgb(np.full((3, 2, 2), np.nan))
+
+
+def test_opencv_provenance_hashes_the_extension_binary_when_present(tmp_path) -> None:
+    package = tmp_path / "cv2"
+    package.mkdir()
+    module = package / "__init__.py"
+    binary = package / "cv2.abi3.so"
+    module.write_bytes(b"python-wrapper")
+    binary.write_bytes(b"native-extension")
+    fake = _FakeCV2()
+    fake.__version__ = "synthetic"
+    fake.__file__ = str(module)
+
+    provenance = opencv_runtime_provenance(fake)
+
+    assert provenance["module_path"] == str(module)
+    assert provenance["binary_path"] == str(binary)
+    assert provenance["module_sha256"] != provenance["binary_sha256"]
+    assert provenance["threads"] == 1
+    assert provenance["opencl_enabled"] is False
