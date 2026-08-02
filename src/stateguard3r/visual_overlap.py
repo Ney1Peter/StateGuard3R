@@ -255,14 +255,24 @@ def opencv_runtime_provenance(cv2_module: Any | None = None) -> dict[str, Any]:
     configure_opencv_determinism(cv2_module)
     build = str(cv2_module.getBuildInformation())
     module_file = Path(str(cv2_module.__file__))
+    binary_candidates = sorted(
+        candidate
+        for pattern in ("cv2*.so", "cv2*.pyd", "cv2*.dll", "cv2*.dylib")
+        for candidate in module_file.parent.glob(pattern)
+        if candidate.is_file()
+    )
+    binary_file = binary_candidates[0] if binary_candidates else module_file
     try:
         module_sha256 = hashlib.sha256(module_file.read_bytes()).hexdigest()
+        binary_sha256 = hashlib.sha256(binary_file.read_bytes()).hexdigest()
     except OSError as error:
         raise VisualOverlapError(f"cannot hash OpenCV module binary: {error}") from error
     return {
         "version": str(cv2_module.__version__),
         "module_path": str(module_file.resolve(strict=True)),
         "module_sha256": module_sha256,
+        "binary_path": str(binary_file.resolve(strict=True)),
+        "binary_sha256": binary_sha256,
         "build_info_sha256": hashlib.sha256(build.encode("utf-8")).hexdigest(),
         "threads": int(cv2_module.getNumThreads()),
         "opencl_enabled": bool(cv2_module.ocl.useOpenCL()),
