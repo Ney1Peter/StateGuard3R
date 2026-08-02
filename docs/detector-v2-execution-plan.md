@@ -686,3 +686,25 @@ formal commitment 后至唯一 evaluate 完成前，不允许任何 tracked comm
 
 用户明确说“开始执行本计划”之前，不创建 Detector v2 代码、不下载数据、不运行 GPU，
 也不创建新的长时目标。
+
+## 14. Execution outcome (2026-08-03)
+
+- [x] Phase 0--6: v1 evidence was preserved; the causal visual proxy, v2
+  scoring, regression tests, instrumentation equivalence, and readiness gate
+  passed.
+- [x] Phase 7: exactly one new official TUM RGB-D+GT archive was acquired and
+  frozen: `rgbd_dataset_freiburg3_walking_static`.
+- [x] Phase 8--10: protocol, CPU validation, commitment, six disclosed
+  development forwards, calibration/unlock, three serial blind forwards, and
+  one evaluation were completed. The formal v2 decision is **GO**; see
+  `docs/audits/formal-v2-result.md` and the immutable 0002 artifacts.
+- [x] A pre-blind audit superseded commitment 0001 before any blind forward
+  because its launcher could have violated the all-three-before-read lock.
+  The corrected, independently committed 0002 version reran development and
+  supplied the only formal decision.
+- [x] Phase 11: the separately pre-registered exploratory ledger-level
+  quarantine proxy completed with decision
+  `EXPLORATORY_PROXY_ONLY_NO_ROLLBACK`. It does not support recovery or
+  rollback claims.
+- [ ] Phase 12: final full-suite verification, documentation commit, artifact
+  permission/process cleanup, and goal close-out remain.
