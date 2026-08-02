@@ -85,6 +85,8 @@ def test_v2_profile_is_explicit_and_copies_causal_overlap_without_view_mutation(
 
     def fake_series(images, *, config):
         assert config.nfeatures == 2000
+        assert config.ratio_threshold == 0.80
+        assert config.ransac_pixel_limit == 1.0
         assert len(images) == len(views)
         assert all(
             np.array_equal(image, view["img"]) for image, view in zip(images, views)
