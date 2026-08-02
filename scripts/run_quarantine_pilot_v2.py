@@ -71,10 +71,11 @@ def _strict_json(payload: bytes, *, name: str) -> Mapping[str, Any]:
     return value
 
 
-def _read(path: Path, *, name: str, mode: int = 0o444) -> Snapshot:
+def _read(path: Path, *, name: str, mode: int | None = 0o444) -> Snapshot:
     metadata = os.lstat(path)
     _require(stat.S_ISREG(metadata.st_mode) and not stat.S_ISLNK(metadata.st_mode), f"{name} must be a regular non-symlink file")
-    _require(stat.S_IMODE(metadata.st_mode) == mode, f"{name} must be frozen {mode:04o}")
+    if mode is not None:
+        _require(stat.S_IMODE(metadata.st_mode) == mode, f"{name} must be frozen {mode:04o}")
     return Snapshot(path, path.read_bytes())
 
 
@@ -120,7 +121,9 @@ def _git(repository: Path, *arguments: str) -> str:
 def _tracked(path: Path, *, name: str) -> Snapshot:
     relative = str(path.relative_to(ROOT))
     _require(_git(ROOT, "ls-files", "--error-unmatch", relative) == relative, f"{name} is not tracked")
-    snapshot = _read(path, name=name, mode=0o644)
+    # Shared-workspace umasks may make tracked source files group-writable.
+    # Exact Git HEAD bytes, not a checkout permission bit, establish provenance.
+    snapshot = _read(path, name=name, mode=None)
     committed = subprocess.run(["git", "-C", str(ROOT), "show", f"HEAD:{relative}"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
     _require(snapshot.payload == committed, f"{name} differs from tracked HEAD")
     return snapshot
