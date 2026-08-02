@@ -668,23 +668,26 @@ def _preflight_holdout_outputs(runs_root: Path, specs: Sequence[RunSpec]) -> Non
 
     problems: list[str] = []
     for spec in specs:
-        directory = runs_root / spec.run_id
         try:
-            metadata = os.lstat(directory)
-            if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o555:
-                problems.append(f"{spec.run_id} output is not frozen")
-                continue
-            names = {entry.name for entry in os.scandir(directory)}
-            if names != set(RUN_FILES.values()):
-                problems.append(f"{spec.run_id} output artifact layout")
-                continue
-            for filename in RUN_FILES.values():
-                child = os.lstat(directory / filename)
-                if not stat.S_ISREG(child.st_mode) or stat.S_ISLNK(child.st_mode) or stat.S_IMODE(child.st_mode) != 0o444:
-                    problems.append(f"{spec.run_id} {filename} is not frozen")
+            _metadata_only_frozen_run(runs_root, spec)
         except OSError as error:
             problems.append(f"{spec.run_id}: {error}")
+        except FormalV2Error as error:
+            problems.append(str(error))
     _require(not problems, "all three blind outputs must finish and freeze before any response/log read: " + " | ".join(problems))
+
+
+def _metadata_only_frozen_run(runs_root: Path, spec: RunSpec) -> None:
+    """Validate an output tree with lstat/scandir only; never open its bytes."""
+
+    directory = runs_root / spec.run_id
+    metadata = os.lstat(directory)
+    _require(stat.S_ISDIR(metadata.st_mode) and not stat.S_ISLNK(metadata.st_mode) and stat.S_IMODE(metadata.st_mode) == 0o555, f"{spec.run_id} output is not frozen")
+    names = {entry.name for entry in os.scandir(directory)}
+    _require(names == set(RUN_FILES.values()), f"{spec.run_id} output artifact layout")
+    for filename in RUN_FILES.values():
+        child = os.lstat(directory / filename)
+        _require(stat.S_ISREG(child.st_mode) and not stat.S_ISLNK(child.st_mode) and stat.S_IMODE(child.st_mode) == 0o444, f"{spec.run_id} {filename} is not frozen")
 
 
 def _go_no_go(development: Mapping[str, Any], holdout: Mapping[str, Any], *, provenance: bool) -> dict[str, Any]:
@@ -805,7 +808,12 @@ def launch_forward(commit_dir: Path, calibration_dir: Path | None, runs_root: Pa
     record = {"schema_version": f"{SCHEMA}.launch.v1", "run_id": run_id, "split": spec.split, "command": command, "pid": process.pid, "gpu": {"id": gpu_id, "uuid": before_two["gpu_uuid"]}, "prelaunch_snapshots": [before_one, before_two], "postexit_snapshot": after, "minimum_free_mib": 12288, "started_at": started, "finished_at": finished, "exit_code": status, "log_path": str(log_dir / f"{run_id}.log"), "output_dir": str(runs_root / run_id)}
     _require(status == 0, f"formal runner failed for {run_id}; preserved log/output at {log_dir / f'{run_id}.log'}")
     _freeze_tree(runs_root / run_id)
-    _frozen_run_output(runs_root, spec)
+    if spec.split == "holdout":
+        # The read lock forbids even hashing/parsing one blind response until all
+        # three sibling runs are frozen.  Only metadata inspection is allowed.
+        _metadata_only_frozen_run(runs_root, spec)
+    else:
+        _frozen_run_output(runs_root, spec)
     record_dir = records_root / run_id
     record_dir.mkdir()
     (record_dir / "launch.json").write_bytes(_json_bytes(record))
