@@ -46,6 +46,15 @@ OFFICIAL_RECAL3R_ENTROPY_EPS = 2e-14
 OFFICIAL_RECAL3R_ENTROPY_HEAD_REDUCE = "mean"
 OFFICIAL_RECAL3R_UNCERTAINTY_CLAMP_MAX = 1.0
 OFFICIAL_RECAL3R_DECAY = 0.95
+V2_VISUAL_CONFIG = {
+    "nfeatures": 2000,
+    "grid_columns": 8,
+    "grid_rows": 6,
+    "minimum_matches": 12,
+    "ratio_threshold": 0.80,
+    "ransac_pixel_limit": 1.0,
+    "rng_seed": 0,
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -459,7 +468,7 @@ def _v2_online_visual_overlap(
     before = [_model_ready_rgb_sha256(image) for image in images]
     series = (online_visual_correspondence_series if series_function is None else series_function)(
         images,
-        config=VisualOverlapConfig(),
+        config=VisualOverlapConfig(**V2_VISUAL_CONFIG),
     )
     after = [_model_ready_rgb_sha256(image) for image in images]
     if before != after:
