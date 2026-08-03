@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import stat
 import tarfile
 from pathlib import Path
 
@@ -52,6 +54,45 @@ def _raw_tree(tmp_path: Path) -> Path:
     (root / "depth.txt").write_text("\n".join(depth_rows) + "\n", encoding="utf-8")
     (root / "groundtruth.txt").write_text("\n".join(gt_rows) + "\n", encoding="utf-8")
     return root
+
+
+def _acquisition_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path, Path]:
+    tum = tmp_path / "tum"
+    outputs = tmp_path / "outputs"
+    tum.mkdir()
+    outputs.mkdir()
+    monkeypatch.setattr(acquire, "TUM_ROOT", tum)
+    monkeypatch.setattr(acquire, "OUTPUT_ROOT", outputs)
+    monkeypatch.setattr(acquire, "EXPECTED_ARCHIVE_BYTES", len(b"fixture"))
+    monkeypatch.setattr(
+        acquire,
+        "_validate_archive",
+        lambda _archive: {"fixture_archive_validation": True},
+    )
+    archive = tum / f"{DATASET_NAME}.tgz"
+    archive.write_bytes(b"fixture")
+    preflight = outputs / acquire.PREFLIGHT_OUTPUT_NAME
+    preflight.mkdir()
+    preflight_record = {
+        "schema_version": "stateguard3r.formal-v3-tum-preflight.v1",
+        "status": "PASS",
+        "dataset": DATASET_NAME,
+        "expected_archive_bytes": len(b"fixture"),
+        "archive_target": str(archive),
+        "raw_target": str(tum / DATASET_NAME),
+        "model_response_search_hits": [],
+        "official_source": {
+            "canonical_url": CANONICAL_URL,
+            "license": acquire.LICENSE,
+            "license_reference": acquire.LICENSE_REFERENCE,
+        },
+    }
+    (preflight / "preflight.json").write_text(
+        json.dumps(preflight_record, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return tum, outputs, preflight
 
 
 def test_v3_candidate_and_budget_are_fixed() -> None:
@@ -147,3 +188,37 @@ def test_response_search_excludes_own_preflight_but_finds_prior_response(
     monkeypatch.setattr(acquire, "OUTPUT_ROOT", stateguard_root / "outputs")
 
     assert _source_response_search() == [str(prior), str(generic_log)]
+
+
+def test_acquire_recovers_the_single_verified_staging_tree_atomically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tum, outputs, preflight = _acquisition_fixture(tmp_path, monkeypatch)
+    staging = tum / f".{DATASET_NAME}.formal-v3-staging-fixture"
+    staging.mkdir()
+    _raw_tree(staging)
+
+    report = acquire.acquire(preflight)
+
+    raw = tum / DATASET_NAME
+    acquisition = outputs / ACQUISITION_OUTPUT_NAME / "acquisition.json"
+    assert report["staging_recovery"] is True
+    assert raw.is_dir()
+    assert not staging.exists()
+    assert not list(tum.glob(f".{DATASET_NAME}.formal-v3-staging-*"))
+    assert stat.S_IMODE(raw.stat().st_mode) == 0o555
+    assert stat.S_IMODE((raw / "rgb.txt").stat().st_mode) == 0o444
+    assert stat.S_IMODE((tum / f"{DATASET_NAME}.tgz").stat().st_mode) == 0o444
+    assert json.loads(acquisition.read_text(encoding="utf-8"))["staging_recovery"] is True
+    assert stat.S_IMODE(acquisition.stat().st_mode) == 0o444
+
+
+def test_acquire_rejects_ambiguous_multiple_staging_trees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tum, _outputs, preflight = _acquisition_fixture(tmp_path, monkeypatch)
+    for suffix in ("one", "two"):
+        (tum / f".{DATASET_NAME}.formal-v3-staging-{suffix}").mkdir()
+
+    with pytest.raises(AcquisitionError, match="multiple unfinished formal-v3 staging"):
+        acquire.acquire(preflight)
