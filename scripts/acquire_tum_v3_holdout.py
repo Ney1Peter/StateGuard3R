@@ -114,7 +114,14 @@ def _freeze_directory_artifacts(directory: Path) -> None:
     directory.chmod(0o555)
 
 
-def _freeze_raw_tree(root: Path) -> None:
+def _freeze_raw_tree(root: Path, *, freeze_root: bool = True) -> None:
+    """Freeze raw contents before rename, then freeze the root after publication.
+
+    This filesystem requires write permission on the renamed directory itself.
+    Therefore its children are made read-only first, while the root stays
+    writable only for the immediately following same-filesystem ``os.replace``.
+    The caller must set the published root to ``0555`` before reporting PASS.
+    """
     for path in sorted(root.rglob("*")):
         if path.is_symlink():
             raise AcquisitionError(f"refusing to freeze symlink in raw tree: {path}")
@@ -124,7 +131,10 @@ def _freeze_raw_tree(root: Path) -> None:
             path.chmod(0o555)
         else:
             raise AcquisitionError(f"unexpected raw-tree entry: {path}")
-    root.chmod(0o555)
+    if freeze_root:
+        root.chmod(0o555)
+    else:
+        root.chmod(0o755)
 
 
 def _archive_path() -> Path:
@@ -591,14 +601,19 @@ def acquire(preflight_dir: Path) -> dict[str, Any]:
     )
     preflight_record = _read_preflight(preflight_dir)
     _require(not _raw_path().exists(), f"formal-v3 raw target already exists: {_raw_path()}")
-    for path in TUM_ROOT.glob(f".{DATASET_NAME}.formal-v3-staging-*"):
-        raise AcquisitionError(f"unfinished formal-v3 staging directory exists: {path}")
+    staging_candidates = sorted(TUM_ROOT.glob(f".{DATASET_NAME}.formal-v3-staging-*"))
+    _require(
+        len(staging_candidates) <= 1,
+        "multiple unfinished formal-v3 staging directories exist",
+    )
     _require(
         shutil.disk_usage(TUM_ROOT).free >= MINIMUM_FREE_BEFORE_DOWNLOAD_BYTES,
         "insufficient disk space before formal-v3 download",
     )
 
     archive = _archive_path()
+    recovered_staging = False
+    raw_manifest: dict[str, Any] | None = None
     if archive.exists():
         _require(archive.is_file() and not archive.is_symlink(), "existing archive is not a regular file")
         _require(not _part_path().exists(), "archive and .part both exist")
@@ -620,20 +635,44 @@ def acquire(preflight_dir: Path) -> dict[str, Any]:
     archive_validation = _validate_archive(archive)
     archive.chmod(0o444)
     archive_sha256 = _sha256(archive)
-    staging_parent, staged_root = _extract_to_staging(archive)
-    try:
+    if staging_candidates:
+        staging_parent = staging_candidates[0]
+        staged_root = staging_parent / DATASET_NAME
+        _require(
+            staging_parent.is_dir() and not staging_parent.is_symlink()
+            and staged_root.is_dir() and not staged_root.is_symlink(),
+            "staging recovery root is invalid",
+        )
+        _require(
+            sorted(staging_parent.iterdir()) == [staged_root],
+            "staging recovery directory has unexpected entries",
+        )
         raw_manifest = _tree_manifest(staged_root)
         aggregate_bytes = archive.stat().st_size + int(raw_manifest["regular_file_bytes"])
         _require(
             aggregate_bytes <= MAX_ARCHIVE_AND_RAW_TREE_BYTES,
-            "published archive plus raw tree exceeds the formal-v3 5 GiB budget",
+            "recovered archive plus raw tree exceeds the formal-v3 5 GiB budget",
         )
-        _freeze_raw_tree(staged_root)
+        _freeze_raw_tree(staged_root, freeze_root=False)
         os.replace(staged_root, _raw_path())
-        _raw_path().chmod(0o555)
-    finally:
-        if staging_parent.exists():
-            shutil.rmtree(staging_parent)
+        staging_parent.rmdir()
+        recovered_staging = True
+    else:
+        staging_parent, staged_root = _extract_to_staging(archive)
+        try:
+            raw_manifest = _tree_manifest(staged_root)
+            aggregate_bytes = archive.stat().st_size + int(raw_manifest["regular_file_bytes"])
+            _require(
+                aggregate_bytes <= MAX_ARCHIVE_AND_RAW_TREE_BYTES,
+                "published archive plus raw tree exceeds the formal-v3 5 GiB budget",
+            )
+            _freeze_raw_tree(staged_root, freeze_root=False)
+            os.replace(staged_root, _raw_path())
+        finally:
+            if staging_parent.exists():
+                shutil.rmtree(staging_parent)
+    _require(raw_manifest is not None, "formal-v3 raw manifest was not constructed")
+    _raw_path().chmod(0o555)
     _require(not _part_path().exists(), "archive part remains after successful publication")
     script = Path(__file__).resolve()
     report = {
@@ -647,6 +686,7 @@ def acquire(preflight_dir: Path) -> dict[str, Any]:
             "record": preflight_record,
         },
         "download": download,
+        "staging_recovery": recovered_staging,
         "archive": {
             "path": str(archive.resolve()),
             "size_bytes": archive.stat().st_size,
