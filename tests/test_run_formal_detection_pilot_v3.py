@@ -64,7 +64,9 @@ def test_blind_preflight_requires_timestamp_sidecar_in_exact_layout(tmp_path: Pa
         pilot._preflight_holdout_outputs(tmp_path, [spec])
 
 
-def _timestamp_fixture(tmp_path: Path) -> tuple[pilot.RunSpec, pilot.Snapshot, dict[str, object]]:
+def _timestamp_fixture(
+    tmp_path: Path, *, order: list[int] | None = None
+) -> tuple[pilot.RunSpec, pilot.Snapshot, dict[str, object]]:
     root = tmp_path / "raw"
     root.mkdir()
     images = []
@@ -77,7 +79,8 @@ def _timestamp_fixture(tmp_path: Path) -> tuple[pilot.RunSpec, pilot.Snapshot, d
         "".join(f"{index / 10:.1f} frame-{index}.png" + chr(10) for index in range(30)),
         encoding="utf-8",
     )
-    captures, provenance = capture_timestamp_records(images, rgb_txt=listing, dataset_root=root)
+    selected = images if order is None else [images[index] for index in order]
+    captures, provenance = capture_timestamp_records(selected, rgb_txt=listing, dataset_root=root)
     sidecar = timestamp_order_sidecar(captures, provenance=provenance)
     sidecar_path = tmp_path / "timestamp-order.json"
     payload = (json.dumps(sidecar, sort_keys=True, indent=2) + "\n").encode()
@@ -115,6 +118,16 @@ def test_timestamp_sidecar_validation_binds_raw_listing_and_final_model_images(
 
     metadata["images"][1]["sha256"] = "0" * 64  # type: ignore[index]
     with pytest.raises(pilot.FormalV3Error, match="RGB binding"):
+        pilot._validate_timestamp_sidecar(snapshot, metadata, spec)
+
+
+def test_timestamp_sidecar_rejects_a_clean_prefix_order_violation(tmp_path: Path) -> None:
+    spec, snapshot, metadata = _timestamp_fixture(
+        tmp_path, order=[0, 2, 1, *range(3, 30)]
+    )
+    metadata["capture_timestamp_order"]["violation_positions"] = [2]  # type: ignore[index]
+
+    with pytest.raises(pilot.FormalV3Error, match="clean-prefix violation"):
         pilot._validate_timestamp_sidecar(snapshot, metadata, spec)
 
 
@@ -160,6 +173,25 @@ def test_runner_command_is_explicit_v3_timestamp_execution(tmp_path: Path) -> No
     assert command[command.index("--health-profile") + 1] == "v3"
     assert command[command.index("--rgb-timestamp-listing") + 1] == str(spec.timestamp_listing.path)
     assert command[command.index("--timestamp-dataset-root") + 1] == str(spec.timestamp_root)
+
+
+def test_commit_cli_requires_a_pre_run_immutable_cpu_validation_directory() -> None:
+    parser = pilot.build_arg_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["commit", "inputs", "commit-output", "--protocol", "protocol.md"])
+
+    args = parser.parse_args(
+        [
+            "commit",
+            "inputs",
+            "commit-output",
+            "--protocol",
+            "protocol.md",
+            "--validation-dir",
+            "formal-v3-input-validation-0001",
+        ]
+    )
+    assert args.validation_dir == Path("formal-v3-input-validation-0001")
 
 
 def test_evaluate_does_not_seal_or_read_when_structural_preflight_fails(
