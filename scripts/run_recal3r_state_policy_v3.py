@@ -21,6 +21,13 @@ import sys
 import time
 from typing import Any, Sequence
 
+# Direct ``python scripts/...`` execution places ``scripts`` rather than the
+# repository root on sys.path.  Add only this repository root before importing
+# shared runner helpers; no external path or baseline file is modified.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
 import scripts.run_recal3r_smoke as smoke
 
 
