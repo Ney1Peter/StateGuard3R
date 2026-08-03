@@ -7,7 +7,11 @@ import sys
 
 import pytest
 
-from scripts.run_recal3r_state_policy_v3 import _parser, _validate_policy_args
+from scripts.run_recal3r_state_policy_v3 import (
+    _parser,
+    _run_without_grad,
+    _validate_policy_args,
+)
 from stateguard3r.recal3r_transactional_v3 import (
     TransactionalReCal3RError,
     run_transactional_recurrent_lighter,
@@ -48,6 +52,26 @@ def test_state_policy_script_is_directly_importable_outside_repository(tmp_path:
 
     assert completed.returncode == 0, completed.stderr
     assert "--state-policy" in completed.stdout
+
+
+def test_state_policy_forward_runs_inside_no_grad_context() -> None:
+    events: list[str] = []
+
+    class _Context:
+        def __enter__(self) -> None:
+            events.append("enter")
+
+        def __exit__(self, *args: object) -> None:
+            events.append("exit")
+
+    class _Torch:
+        def no_grad(self) -> _Context:
+            return _Context()
+
+    result = _run_without_grad(_Torch(), lambda: events.append("forward") or 7)
+
+    assert result == 7
+    assert events == ["enter", "forward", "exit"]
 
 
 @pytest.mark.parametrize(
