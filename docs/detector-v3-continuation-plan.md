@@ -1,7 +1,7 @@
 # StateGuard3R Detector v3：持续执行计划
 
 - 制定日期：2026-08-03
-- 状态：**执行中**
+- 状态：**已完成：`V3_GO_AND_STATE_POLICY_VALIDATED`（不含 recovery-quality claim）**
 - 上位计划：[detector-v3-execution-plan.md](detector-v3-execution-plan.md)
 - 正式盲测协议：[detection-formal-v3.md](protocols/detection-formal-v3.md)
 
@@ -142,5 +142,8 @@ clean-prefix FPR <=0.15、FP streak <=3、三类均 event 内检出且 wrong-ord
 
 ## 5. 当前执行指针
 
-当前位于 **A1：为已验证 staging 的原子恢复路径补测试和验证**。通过 A 门禁后按 A -> B -> C ->
-D -> E/F 顺序推进；不跳过门禁，也不以中间开发结果提前宣布成功。
+全部门禁已经完成：A/B 的唯一场景与 CPU provenance validation 均 PASS；C 的 commitment、六条
+development forward 和 calibration 已冻结；D 的一次 blind evaluation 为 `DETECTOR_V3_GO`；E 的
+frozen-detector-triggered transaction validator 为 PASS。最终审计、提交和资源核对记录于
+`docs/audits/formal-v3-result.md` 与 `docs/audits/recal3r-state-policy-v3-feasibility.md`。结论不包含
+ATE/RPE、几何恢复或 recovery-quality claim。

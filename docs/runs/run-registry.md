@@ -1753,6 +1753,34 @@ launched or created.
   `outputs/state-policy-v3-feasibility-0003`.
 - Full audit: `docs/audits/recal3r-state-policy-v3-feasibility.md`.
 
+### FORMAL-DETECTOR-V3-0001: independent timestamp-order blind evaluation
+
+- Status: **GO** — single sealed evaluation, `DETECTOR_V3_GO`.
+- Scene: the only new official TUM archive, `rgbd_dataset_freiburg2_desk`; raw archive/tree
+  total 3,895,008,662 bytes under the 5 GiB cap.
+- Evidence: commitment `a0a33b215797a9925565fbb48daecff10c1b8607bf8e530750bea6552a51914a`,
+  evaluation manifest `180ceaa20dd4de353d6833eddd42d97390a6e20220ef950af6e1eab671cc4e72`, and one
+  attempt seal `acc5d2a10a00d32f738e8269263586bbbd6942fd3e4de9717afda0d24bfedd7e`.
+- Result: combined macro-AUROC 0.9933333333, pooled FPR 0.0163934426, clean-prefix FPR
+  0.0222222222, maximum FP streak 1; all three corruption types detected and wrong-order
+  delay 0. The blind outputs were run and frozen before any response byte was read.
+- Full audit: `docs/audits/formal-v3-result.md`.
+
+### STATE-POLICY-V3-DETECTOR-0005: frozen-detector-triggered transactional follow-up
+
+- Status: **PASS**, scope `TRANSACTIONAL_STATE_POLICY_VALIDATED_NO_RECOVERY_QUALITY_CLAIM`.
+- Input: now-disclosed formal-v3 `blind-wrong-order`, bound by its manifest SHA-256 to the
+  frozen v3 runner/evaluation timeline. Hybrid positions 15--19 were transformed only by the
+  causal rising-edge policy to trigger position 15.
+- Result: the prior alarm held frame-16 state and a clear prior score replayed it at frame 17;
+  the validator confirms restored/replayed state digests, no dropped transaction, byte-equivalent
+  model/health artifacts and postflight PID absence.
+- Outputs: `outputs/state-policy-v3-v2-control-0004`,
+  `outputs/state-policy-v3-always-commit-0004`,
+  `outputs/state-policy-v3-detector-hold-0005`, and immutable validator result
+  `outputs/state-policy-v3-detector-feasibility-0005`.
+- Full audit: `docs/audits/recal3r-state-policy-v3-feasibility.md`.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.

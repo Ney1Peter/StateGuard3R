@@ -2,9 +2,9 @@
 
 - Audit date: 2026-08-03
 - Status: **PASS — `TRANSACTIONAL_STATE_POLICY_VALIDATED_NO_RECOVERY_QUALITY_CLAIM`**
-- Scope: a disclosed 30-frame `formal-v1` development input and one synthetic control
-  alarm. This is not a Detector v3 formal result, an attack evaluation, ATE/RPE
-  comparison, or a recovery-quality claim.
+- Scope: the original disclosed `formal-v1` synthetic-control proof plus the completed,
+  post-Detector-v3-GO, detector-triggered follow-up below. Neither is an ATE/RPE comparison
+  or a recovery-quality claim.
 
 ## What was tested
 
@@ -89,3 +89,35 @@ state. This does **not** show geometric recovery, lower drift, safer detection, 
 benefit on natural corruption. The alarm here was forced and the scene is disclosed.
 Any recovery-quality experiment remains prohibited until Detector v3 formal GO and a
 separate pre-registered quality protocol are in place.
+
+## Detector-triggered post-GO follow-up (0004/0005)
+
+Formal Detector v3 subsequently reached `DETECTOR_V3_GO` in
+`outputs/formal-v3-evaluation-0001`. The exploratory follow-up protocol is
+`docs/protocols/state-policy-v3-detector-trigger-followup.md`; it uses the now-disclosed
+`blind-wrong-order` input, not a new dataset or a second detector evaluation.
+
+The frozen formal v3 evidence had hybrid alarms at positions 15--19. The follow-up policy uses
+the fixed causal rising-edge transform, therefore it emitted one policy trigger at 15; at frame
+16 it held the candidate state and at frame 17 it restored/replayed that held proposal before the
+next candidate. It consumed no labels, event metadata, GT, depth, source index or future score.
+
+| Artifact | Result |
+| --- | --- |
+| `state-policy-v3-v2-control-0004` | baseline success; content hashes preserved during explicit `0555/0444` publication |
+| `state-policy-v3-always-commit-0004` | success; byte-equivalent to baseline for checkpoint/health/prediction/trajectory |
+| `state-policy-v3-detector-hold-0004` | retained frozen operational failure: consecutive raw alarms removed trace steps; not used for a conclusion |
+| `state-policy-v3-detector-hold-0005` | success; frozen detector-rising-edge trigger |
+| `state-policy-v3-detector-feasibility-0005` | CPU validator PASS, SHA-256 `b67c3f4078035c495e49c810f6a2c1a9c871ea569a8cda08bf406cd3b963c371` |
+
+The validator bound the detector run metadata SHA-256
+`4e5c060fe5092903c175ca84823b2f88caadc6e0f24cc6d22cbe4496f4db3d55` and evaluation
+timeline SHA-256 `5f5875d5608e065d3af4c9007edcb520ef2706b492b3e15223de8a88d3b43718` to the exact
+input manifest. It verified detector-triggered hold at frame 16, replay at frame 17, restored
+pre-state digest, no silently dropped transaction, PID absence in both postflight snapshots, and
+byte identity of checkpoint audit, health ledger, prediction summary and trajectory across the
+three successful paths.
+
+The final scope remains **`TRANSACTIONAL_STATE_POLICY_VALIDATED_NO_RECOVERY_QUALITY_CLAIM`**:
+state/memory commit control is demonstrated, but no geometric quality or recovery benefit is
+claimed.
