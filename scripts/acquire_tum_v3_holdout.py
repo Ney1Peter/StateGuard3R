@@ -618,6 +618,7 @@ def acquire(preflight_dir: Path) -> dict[str, Any]:
         archive.chmod(0o444)
 
     archive_validation = _validate_archive(archive)
+    archive.chmod(0o444)
     archive_sha256 = _sha256(archive)
     staging_parent, staged_root = _extract_to_staging(archive)
     try:
