@@ -135,8 +135,9 @@ def _write_run(path: Path, *, profile: str, pid: int) -> None:
         _write_json(path / "run.json", metadata)
 
 
-def _postflight(path: Path) -> None:
-    path.write_text("NVIDIA-SMI\nNo runner process remains\n", encoding="utf-8")
+def _postflight(path: Path, *, query_format: bool = False) -> None:
+    signature = "NVSMI LOG" if query_format else "NVIDIA-SMI"
+    path.write_text(f"{signature}\nNo runner process remains\n", encoding="utf-8")
 
 
 def test_validates_equivalent_v2_and_v3_runs(tmp_path: Path) -> None:
@@ -182,3 +183,21 @@ def test_rejects_timestamp_sidecar_unbound_from_model_input(tmp_path: Path) -> N
             v2_postflight_log=v2_log,
             v3_postflight_log=v3_log,
         )
+
+
+def test_accepts_nvidia_smi_query_format_postflight_logs(tmp_path: Path) -> None:
+    v2, v3 = tmp_path / "v2", tmp_path / "v3"
+    _write_run(v2, profile="v2", pid=123)
+    _write_run(v3, profile="v3", pid=456)
+    v2_log, v3_log = tmp_path / "v2.log", tmp_path / "v3.log"
+    _postflight(v2_log, query_format=True)
+    _postflight(v3_log, query_format=True)
+
+    report = validate_instrumentation(
+        v2_dir=v2,
+        v3_dir=v3,
+        v2_postflight_log=v2_log,
+        v3_postflight_log=v3_log,
+    )
+
+    assert report["status"] == "PASS"
