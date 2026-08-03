@@ -83,12 +83,23 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta-base", default=0.1, type=float)
     parser.add_argument(
         "--health-profile",
-        choices=("v1", "v2"),
+        choices=("v1", "v2", "v3"),
         default="v1",
         help=(
             "health instrumentation profile; v1 preserves the legacy path, "
-            "while v2 adds causal visual correspondence before inference"
+            "v2 adds causal visual correspondence, and v3 additionally emits "
+            "a capture-timestamp order sidecar before inference"
         ),
+    )
+    parser.add_argument(
+        "--rgb-timestamp-listing",
+        type=Path,
+        help="raw official rgb.txt used only by --health-profile v3",
+    )
+    parser.add_argument(
+        "--timestamp-dataset-root",
+        type=Path,
+        help="raw dataset root that contains --rgb-timestamp-listing entries for v3",
     )
     return parser
 
@@ -213,6 +224,30 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         raw_manifest.resolve(strict=False) if raw_manifest is not None else None
     )
     output_dir = args.output_dir.resolve(strict=False)
+    health_profile = getattr(args, "health_profile", "v1")
+    raw_timestamp_listing = getattr(args, "rgb_timestamp_listing", None)
+    raw_timestamp_root = getattr(args, "timestamp_dataset_root", None)
+    if health_profile not in {"v1", "v2", "v3"}:
+        parser.error(f"unsupported health profile {health_profile!r}")
+    if health_profile == "v3":
+        if input_manifest is None:
+            parser.error("--health-profile v3 requires --input-manifest")
+        if raw_timestamp_listing is None or raw_timestamp_root is None:
+            parser.error(
+                "--health-profile v3 requires --rgb-timestamp-listing and --timestamp-dataset-root"
+            )
+    elif raw_timestamp_listing is not None or raw_timestamp_root is not None:
+        parser.error("timestamp listing arguments are valid only with --health-profile v3")
+    timestamp_listing = (
+        Path(raw_timestamp_listing).resolve(strict=False)
+        if raw_timestamp_listing is not None
+        else None
+    )
+    timestamp_dataset_root = (
+        Path(raw_timestamp_root).resolve(strict=False)
+        if raw_timestamp_root is not None
+        else None
+    )
 
     writable_paths = [
         ("baseline root", baseline_root),
@@ -221,6 +256,10 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     read_only_paths = [("checkpoint", checkpoint)]
     if input_manifest is not None:
         read_only_paths.append(("input manifest", input_manifest))
+    if timestamp_listing is not None:
+        read_only_paths.append(("RGB timestamp listing", timestamp_listing))
+    if timestamp_dataset_root is not None:
+        read_only_paths.append(("timestamp dataset root", timestamp_dataset_root))
     read_only_paths.extend(("input image", path) for path in images)
     for label, path in writable_paths:
         if not _inside_project(path):
@@ -235,6 +274,11 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         parser.error(f"baseline src directory does not exist: {baseline_src}")
     if not checkpoint.is_file():
         parser.error(f"checkpoint does not exist: {checkpoint}")
+    if timestamp_listing is not None:
+        if not timestamp_listing.is_file() or timestamp_listing.is_symlink():
+            parser.error("--rgb-timestamp-listing must be a regular non-symlink file")
+        if not timestamp_dataset_root.is_dir() or timestamp_dataset_root.is_symlink():
+            parser.error("--timestamp-dataset-root must be a non-symlink directory")
     expected_size = SUPPORTED_CHECKPOINT_SIZES.get(checkpoint.name)
     if expected_size is None:
         supported = ", ".join(sorted(SUPPORTED_CHECKPOINT_SIZES))
@@ -361,6 +405,11 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     args.image_sha256 = {path: _sha256(path) for path in dict.fromkeys(images)}
     args.output_dir = output_dir
     args.baseline_commit = baseline_commit
+    args.rgb_timestamp_listing = timestamp_listing
+    args.timestamp_dataset_root = timestamp_dataset_root
+    args.rgb_timestamp_listing_sha256 = (
+        _sha256(timestamp_listing) if timestamp_listing is not None else None
+    )
 
 
 def _prepare_views(image_paths: Sequence[Path], size: int, torch: Any) -> list[dict[str, Any]]:
@@ -424,7 +473,7 @@ def _health_profile(args: argparse.Namespace) -> str:
     """Resolve the legacy default even for older direct test namespaces."""
 
     profile = getattr(args, "health_profile", "v1")
-    if profile not in {"v1", "v2"}:
+    if profile not in {"v1", "v2", "v3"}:
         raise RuntimeError(f"unsupported health profile {profile!r}")
     return profile
 
@@ -520,6 +569,28 @@ def _apply_v2_overlap_to_health(
     return output
 
 
+def _v3_timestamp_order_sidecar(args: argparse.Namespace) -> dict[str, Any]:
+    """Bind final manifest RGB paths to raw capture timestamps before inference."""
+
+    manifest = args.input_manifest_data
+    if manifest is None or args.rgb_timestamp_listing is None or args.timestamp_dataset_root is None:
+        raise RuntimeError("v3 timestamp order requires a validated manifest and raw rgb.txt provenance")
+    from stateguard3r.timestamp_order_v3 import (
+        capture_timestamp_records,
+        timestamp_order_sidecar,
+        validate_timestamp_order_sidecar,
+    )
+
+    captures, provenance = capture_timestamp_records(
+        [frame.path for frame in manifest.frames],
+        rgb_txt=args.rgb_timestamp_listing,
+        dataset_root=args.timestamp_dataset_root,
+    )
+    sidecar = timestamp_order_sidecar(captures, provenance=provenance)
+    validate_timestamp_order_sidecar(sidecar, require_available=True)
+    return sidecar
+
+
 def _verify_preflight_inputs(args: argparse.Namespace) -> None:
     """Reject any input changed since static validation."""
 
@@ -540,6 +611,14 @@ def _verify_preflight_inputs(args: argparse.Namespace) -> None:
                     args.source_manifest_sha256,
                 ),
             ]
+        )
+    if getattr(args, "rgb_timestamp_listing", None) is not None:
+        expected.append(
+            (
+                "RGB timestamp listing",
+                args.rgb_timestamp_listing,
+                getattr(args, "rgb_timestamp_listing_sha256", None),
+            )
         )
     expected.extend(
         ("input image", path, digest)
@@ -1067,11 +1146,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     views = _prepare_input_views(args, torch)
     v2_overlaps: list[float | None] | None = None
     v2_visual_metadata: dict[str, Any] | None = None
-    if health_profile == "v2":
+    v3_timestamp_sidecar: dict[str, Any] | None = None
+    if health_profile in {"v2", "v3"}:
         visual_started = time.perf_counter()
         v2_overlaps, v2_visual_metadata = _v2_online_visual_overlap(views)
         v2_visual_metadata["runtime_seconds"] = time.perf_counter() - visual_started
+    if health_profile == "v3":
+        v3_timestamp_sidecar = _v3_timestamp_order_sidecar(args)
     args.output_dir.mkdir(parents=True, exist_ok=False)
+    if v3_timestamp_sidecar is not None:
+        from stateguard3r.timestamp_order_v3 import write_timestamp_order_sidecar_atomic
+
+        write_timestamp_order_sidecar_atomic(
+            args.output_dir / "timestamp-order.json", v3_timestamp_sidecar
+        )
 
     model, checkpoint_state_dict = _load_model_with_state_dict_audit(
         ARCroco3DStereo,
@@ -1182,7 +1270,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for index, record in enumerate(health)
     ]
-    if health_profile == "v2":
+    if health_profile in {"v2", "v3"}:
         if v2_overlaps is None or v2_visual_metadata is None:
             raise RuntimeError("v2 visual overlap instrumentation is unavailable")
         health = _apply_v2_overlap_to_health(health, v2_overlaps)
@@ -1279,9 +1367,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         "torch_version": torch.__version__,
         "cuda_runtime": torch.version.cuda,
     }
-    if health_profile == "v2":
-        metadata["health_profile"] = "v2"
+    if health_profile in {"v2", "v3"}:
+        metadata["health_profile"] = health_profile
         metadata["online_visual_correspondence"] = v2_visual_metadata
+    if health_profile == "v3":
+        if v3_timestamp_sidecar is None:
+            raise RuntimeError("v3 timestamp order instrumentation is unavailable")
+        timestamp_path = args.output_dir / "timestamp-order.json"
+        metadata["capture_timestamp_order"] = {
+            "path": str(timestamp_path),
+            "sha256": _sha256(timestamp_path),
+            "schema_version": v3_timestamp_sidecar["schema_version"],
+            "purpose": v3_timestamp_sidecar["purpose"],
+            "violation_positions": [
+                record["frame_id"]
+                for record in v3_timestamp_sidecar["records"]
+                if record["timestamp_order_violation"] is True
+            ],
+        }
     _write_json_atomic(args.output_dir / "run.json", metadata)
     print(json.dumps(metadata, ensure_ascii=False, indent=2, allow_nan=False))
     return 0
