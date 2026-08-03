@@ -1727,6 +1727,19 @@ recovery effectiveness. The holdout is now disclosed and must not be used for a 
 No high-risk skip, reduced-rate, quarantine, rollback, or associated safe-replay intervention was
 launched or created.
 
+### DETECTOR-V3-INSTRUMENTATION-0001: v2/v3 observational forward equivalence
+
+- Status: **PASS**; disclosed 30-frame `formal-v1` development-dynamic manifest only.
+- Outputs: `outputs/detector-v3-instrumentation-v2-0001`,
+  `outputs/detector-v3-instrumentation-v3-0001`, and immutable validator result
+  `outputs/detector-v3-instrumentation-equivalence-0001`.
+- GPU: one serial `CUDA_VISIBLE_DEVICES=0` NVIDIA L20 run per profile; the two recorded
+  PIDs exited and GPU 0 returned to 43,351 MiB free. Unrelated existing processes were
+  identified but not touched.
+- Result: checkpoint audit, health JSONL, prediction summary, and trajectory are
+  byte-identical; v3 adds only a valid, input-bound `timestamp-order.json` sidecar.
+- Full audit: `docs/audits/detector-v3-instrumentation-audit.md`.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
