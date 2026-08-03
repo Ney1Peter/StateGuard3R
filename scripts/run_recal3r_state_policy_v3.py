@@ -160,7 +160,7 @@ def _detector_v3_alarms(args: argparse.Namespace) -> tuple[list[bool], dict[str,
     attribution = timeline.get("attribution")
     if not isinstance(attribution, list) or not attribution:
         raise RuntimeError("detector alarm timeline lacks attribution rows")
-    alarms: list[bool] = []
+    hybrid_alarms: list[bool] = []
     for frame_id, row in enumerate(attribution):
         if not isinstance(row, dict) or set(row) != {
             "frame_id", "continuous_alarm", "timestamp_order_alarm", "hybrid_alarm"
@@ -173,10 +173,15 @@ def _detector_v3_alarms(args: argparse.Namespace) -> tuple[list[bool], dict[str,
             raise RuntimeError(f"detector attribution row {frame_id} is invalid")
         # Labels and corruption fields in the evaluated timeline are deliberately
         # never referenced: the policy receives only the frozen hybrid decision.
-        alarms.append(row["hybrid_alarm"])
-    positions = [index for index, alarm in enumerate(alarms) if alarm]
-    if not positions:
+        hybrid_alarms.append(row["hybrid_alarm"])
+    hybrid_positions = [index for index, alarm in enumerate(hybrid_alarms) if alarm]
+    if not hybrid_positions:
         raise RuntimeError("detector alarm source contains no hybrid alarms")
+    # Repeated per-frame detector alarms describe one ongoing event.  The
+    # policy turns a causal false->true transition into one bounded transaction
+    # episode, so a hold/replay can complete before later updates are judged.
+    alarms = [alarm and (index == 0 or not hybrid_alarms[index - 1]) for index, alarm in enumerate(hybrid_alarms)]
+    positions = [index for index, alarm in enumerate(alarms) if alarm]
     return alarms, {
         "kind": "frozen_formal_v3_hybrid_alarm",
         "run": run_artifact,
@@ -186,7 +191,9 @@ def _detector_v3_alarms(args: argparse.Namespace) -> tuple[list[bool], dict[str,
             "sha256": smoke._sha256(input_manifest),
             "size_bytes": input_manifest.stat().st_size,
         },
-        "alarm_positions": positions,
+        "hybrid_alarm_positions": hybrid_positions,
+        "policy_alarm_positions": positions,
+        "policy_filter": "causal_hybrid_alarm_rising_edge",
         "causality": "policy reads only alarm_t_minus_1; labels and event metadata are not consumed",
     }
 

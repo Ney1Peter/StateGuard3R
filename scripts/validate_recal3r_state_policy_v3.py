@@ -257,13 +257,26 @@ def _assert_detector_alarm_source(forced_run: Mapping[str, Any]) -> tuple[list[i
     _require(values["timeline"].get("run_id") == "blind-wrong-order", "detector source timeline differs")
     rows = values["timeline"].get("attribution")
     _require(isinstance(rows, list) and len(rows) == forced_run.get("frame_count"), "detector source attribution count differs")
-    positions: list[int] = []
+    hybrid_positions: list[int] = []
     for frame_id, row in enumerate(rows):
         _require(isinstance(row, Mapping) and row.get("frame_id") == frame_id and isinstance(row.get("hybrid_alarm"), bool), "detector source attribution row differs")
         if row["hybrid_alarm"]:
-            positions.append(frame_id)
-    _require(positions and source.get("alarm_positions") == positions, "detector source hybrid alarm positions differ")
-    return positions, evidence
+            hybrid_positions.append(frame_id)
+    policy_positions = [
+        frame_id
+        for frame_id, row in enumerate(rows)
+        if row["hybrid_alarm"] and (frame_id == 0 or not rows[frame_id - 1]["hybrid_alarm"])
+    ]
+    _require(
+        hybrid_positions
+        and source.get("hybrid_alarm_positions") == hybrid_positions
+        and source.get("policy_alarm_positions") == policy_positions
+        and source.get("policy_filter") == "causal_hybrid_alarm_rising_edge",
+        "detector source hybrid alarm positions differ",
+    )
+    evidence["hybrid_alarm_positions"] = hybrid_positions
+    evidence["policy_alarm_positions"] = policy_positions
+    return policy_positions, evidence
 
 
 def validate_state_policy(
