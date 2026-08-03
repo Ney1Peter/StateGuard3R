@@ -35,8 +35,10 @@ outputs/formal-v3-evaluation-0001/timelines/blind-wrong-order.json
 `detector-v3-prior-alarm` 必须验证 run metadata 的 input-manifest path/SHA-256/size 与当前 wrapper
 input 完全一致，验证 v3 health profile，并只逐帧读取 timeline attribution 的
 `hybrid_alarm` boolean。它禁止访问 `labels`、corruption/event metadata、GT、depth、source index
-或 future score。传入 transactional controller 的冻结 alarm vector 必须写入只读 run metadata；
-controller 在 frame `t` 只能查看 `alarm[t-1]`。
+或 future score。连续的 true 表示同一持续风险 episode，因此 controller 使用固定、因果的
+`false -> true` 上升沿过滤器；它完整记录原始 hybrid positions 与 policy positions，但只将每个
+episode 的第一帧作为 bounded hold/replay trigger。controller 在 frame `t` 只能查看 policy
+alarm `t-1`。
 
 ## 三组固定运行
 
@@ -45,7 +47,7 @@ controller 在 frame `t` 只能查看 `alarm[t-1]`。
 
 1. `state-policy-v3-v2-control-0004`：未包装 pinned smoke runner；
 2. `state-policy-v3-always-commit-0004`：external wrapper，零 alarm；
-3. `state-policy-v3-detector-hold-0004`：external wrapper，
+3. `state-policy-v3-detector-hold-0005`：external wrapper，
    `detector-v3-prior-alarm` 及上述两个冻结 evidence path。
 
 每条 run 的 stdout/stderr、启动命令、PID、GPU UUID、两次 preflight 与 postflight `nvidia-smi`
@@ -54,7 +56,9 @@ ReCal3R source、checkpoint、formal v3 inputs/runs/evaluation，且不下载、
 
 ## 验证与门槛
 
-CPU validator 输出固定为 `outputs/state-policy-v3-detector-feasibility-0004/`，并要求：
+CPU validator 输出固定为 `outputs/state-policy-v3-detector-feasibility-0005/`。先前
+`state-policy-v3-detector-hold-0004` 在连续 raw alarm 下显式保留为 failed operational attempt；
+它没有被覆盖、删除或用于结论。新编号使用上述预先固定的 causal rising-edge policy，并要求：
 
 1. baseline、always-commit、detector-policy 使用相同 input/checkpoint/runtime identity；
 2. baseline 与 always-commit 的四个 model/health artifacts 逐字节一致；detector policy 的同四个
