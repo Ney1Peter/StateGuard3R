@@ -65,6 +65,16 @@ provenance is a formal integrity failure.  The resulting claim is restricted
 to reordered packets retaining their original capture timestamps; it does not
 claim universal content-reorder detection.
 
+A timestamp predicate is intentionally **not** restricted by corruption type.
+For example, a disjoint low-overlap donor inserted at positions 15--19 can
+produce a timestamp descent at the insertion or return boundary; that is an
+observable final-stream order anomaly and therefore legitimately activates the
+same hard channel.  The validator never reads a corruption label to accept or
+reject a predicate.  Instead it proves every final path's raw provenance and
+requires no true predicate in the clean prefix (positions 0--14); the final
+report exposes the full per-frame continuous/timestamp attribution for all
+three runs.
+
 ## Input construction and labels
 
 Before any model forward, the input builder must first prove that the raw
