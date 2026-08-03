@@ -26,6 +26,7 @@ from scripts.run_recal3r_smoke import (
     _prepare_input_views,
     _runner_provenance,
     _v2_online_visual_overlap,
+    _v3_timestamp_order_sidecar,
     _validate_args,
     _validate_model_interface,
     _verify_preflight_inputs,
@@ -231,6 +232,18 @@ def _corruption_manifest(tmp_path: Path) -> tuple[Path, list[Path]]:
     return manifest, frames
 
 
+def _raw_rgb_listing(tmp_path: Path, frames: list[Path]) -> Path:
+    """Create a minimal official-style capture listing for runner validation."""
+
+    listing = tmp_path / "rgb.txt"
+    listing.write_text(
+        "# capture timestamps are deliberately independent from manifest metadata\n"
+        + "".join(f"{index / 10:.1f} {frame.name}\n" for index, frame in enumerate(frames)),
+        encoding="utf-8",
+    )
+    return listing
+
+
 def test_static_validation_accepts_manifest_and_resolves_final_order(
     tmp_path: Path,
 ) -> None:
@@ -244,6 +257,79 @@ def test_static_validation_accepts_manifest_and_resolves_final_order(
     assert args.input_manifest == manifest.resolve()
     assert args.image == [frames[index].resolve() for index in (3, 1, 3, 2)]
     assert len(args.input_manifest_data.frames) == 4
+
+
+def test_v3_validation_requires_raw_capture_timestamp_provenance(
+    tmp_path: Path,
+) -> None:
+    manifest, frames = _corruption_manifest(tmp_path)
+    args = _args(tmp_path)
+    args.image = None
+    args.input_manifest = manifest
+    args.health_profile = "v3"
+
+    with pytest.raises(SystemExit):
+        _validate_args(args, _parser())
+
+    args = _args(tmp_path)
+    args.image = None
+    args.input_manifest = manifest
+    args.health_profile = "v3"
+    args.rgb_timestamp_listing = _raw_rgb_listing(tmp_path, frames)
+    args.timestamp_dataset_root = tmp_path
+    _validate_args(args, _parser())
+
+    assert args.rgb_timestamp_listing == (tmp_path / "rgb.txt").resolve()
+    assert args.timestamp_dataset_root == tmp_path.resolve()
+    assert args.rgb_timestamp_listing_sha256 == hashlib.sha256(
+        (tmp_path / "rgb.txt").read_bytes()
+    ).hexdigest()
+
+    sidecar = _v3_timestamp_order_sidecar(args)
+    assert [record["rgb_capture_timestamp_text"] for record in sidecar["records"]] == [
+        "0.3",
+        "0.1",
+        "0.3",
+        "0.2",
+    ]
+    assert [record["timestamp_order_violation"] for record in sidecar["records"]] == [
+        None,
+        True,
+        False,
+        True,
+    ]
+    assert sidecar["provenance"]["input_contract"] == (
+        "ordered_rgb_paths_only_no_source_index_gt_label_or_event_metadata"
+    )
+
+
+def test_v3_timestamp_listing_is_rechecked_before_inference(tmp_path: Path) -> None:
+    manifest, frames = _corruption_manifest(tmp_path)
+    args = _args(tmp_path)
+    args.image = None
+    args.input_manifest = manifest
+    args.health_profile = "v3"
+    listing = _raw_rgb_listing(tmp_path, frames)
+    args.rgb_timestamp_listing = listing
+    args.timestamp_dataset_root = tmp_path
+    _validate_args(args, _parser())
+    listing.write_text("0.0 frame_0.png\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="RGB timestamp listing changed"):
+        _verify_preflight_inputs(args)
+
+
+def test_timestamp_provenance_arguments_are_rejected_outside_v3(tmp_path: Path) -> None:
+    manifest, frames = _corruption_manifest(tmp_path)
+    args = _args(tmp_path)
+    args.image = None
+    args.input_manifest = manifest
+    args.health_profile = "v2"
+    args.rgb_timestamp_listing = _raw_rgb_listing(tmp_path, frames)
+    args.timestamp_dataset_root = tmp_path
+
+    with pytest.raises(SystemExit):
+        _validate_args(args, _parser())
 
 
 def test_static_validation_rejects_ambiguous_input_modes(tmp_path: Path) -> None:
