@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,16 @@ def _raw_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     monkeypatch.setattr(prepare, "ACQUISITION", acquisition)
     monkeypatch.setattr(validator, "OUTPUT_ROOT", outputs)
     return outputs, raw
+
+
+def test_prepare_enables_local_stateguard_source_for_reused_baseline_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = str(prepare.ROOT / "src")
+    monkeypatch.setattr(prepare.sys, "path", [entry for entry in sys.path if entry != source])
+
+    assert prepare._enable_stateguard_src() == prepare.ROOT / "src"
+    assert prepare.sys.path[0] == source
 
 
 def _donor_at_90(frames, *, low_base_start: int, base_starts: list[int]):
