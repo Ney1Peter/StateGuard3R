@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -30,6 +33,21 @@ def test_state_policy_parser_defaults_to_v2_and_accepts_control_modes() -> None:
     _validate_policy_args(
         _policy_args(state_policy="forced-prior-alarm", alarm_frame=[1, 4]), parser
     )
+
+
+def test_state_policy_script_is_directly_importable_outside_repository(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "run_recal3r_state_policy_v3.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=tmp_path,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "--state-policy" in completed.stdout
 
 
 @pytest.mark.parametrize(
