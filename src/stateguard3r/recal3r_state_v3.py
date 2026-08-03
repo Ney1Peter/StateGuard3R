@@ -237,6 +237,8 @@ class StateTransaction:
     post_state: StateClosure
     pre_model: ModelStateSnapshot
     post_model: ModelStateSnapshot
+    pre_reset_mask: Any
+    post_reset_mask: Any
 
     def digest(self) -> dict[str, Any]:
         return {
@@ -245,6 +247,8 @@ class StateTransaction:
             "post_state": self.post_state.digest(),
             "pre_model": self.pre_model.digest(),
             "post_model": self.post_model.digest(),
+            "pre_reset_mask": _value_digest(self.pre_reset_mask),
+            "post_reset_mask": _value_digest(self.post_reset_mask),
         }
 
 
