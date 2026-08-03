@@ -98,6 +98,13 @@ def _freeze_output_tree(output_dir: Path) -> None:
     output_dir.chmod(0o555)
 
 
+def _run_without_grad(torch: Any, callback: Any) -> Any:
+    """Match the pinned ``@torch.no_grad`` lighter-inference contract."""
+
+    with torch.no_grad():
+        return callback()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -211,16 +218,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         torch.cuda.synchronize(device)
         torch.cuda.reset_peak_memory_stats(device)
     started = time.perf_counter()
-    result = run_transactional_recurrent_lighter(
-        views,
-        model,
-        device,
-        torch=torch,
-        to_gpu=dust3r_device_module.to_gpu,
-        to_cpu=dust3r_device_module.to_cpu,
-        canonicalize_model_update_type=dust3r_model_module.canonicalize_model_update_type,
-        alarms=alarms,
-        max_hold=args.max_hold,
+    result = _run_without_grad(
+        torch,
+        lambda: run_transactional_recurrent_lighter(
+            views,
+            model,
+            device,
+            torch=torch,
+            to_gpu=dust3r_device_module.to_gpu,
+            to_cpu=dust3r_device_module.to_cpu,
+            canonicalize_model_update_type=dust3r_model_module.canonicalize_model_update_type,
+            alarms=alarms,
+            max_hold=args.max_hold,
+        ),
     )
     if device.type == "cuda":
         torch.cuda.synchronize(device)
