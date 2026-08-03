@@ -164,6 +164,108 @@ def _assert_forced_timeline(timeline: Mapping[str, Any], always_timeline: Mappin
     }
 
 
+def _assert_detector_timeline(
+    timeline: Mapping[str, Any],
+    always_timeline: Mapping[str, Any],
+    *,
+    alarm_positions: list[int],
+) -> dict[str, Any]:
+    """Verify a real frozen-v3 alarm caused causal hold/replay transitions."""
+    _require(timeline.get("policy") == "detector-v3-prior-alarm", "detector policy name is invalid")
+    _require(timeline.get("max_hold") == 3, "detector max_hold must be three")
+    _require(timeline.get("alarm_positions") == alarm_positions, "detector alarm positions differ")
+    _require(timeline.get("dropped_transaction_frame_ids") == [], "detector policy silently dropped held state")
+    records = timeline.get("transactions")
+    control_records = always_timeline.get("transactions")
+    _require(isinstance(records, list) and isinstance(control_records, list), "detector state transactions are invalid")
+    _require(len(records) == len(control_records) == 30, "detector state transaction count must be 30")
+    holds = [record for record in records if isinstance(record, Mapping) and record.get("action") == "hold"]
+    replays = [
+        record
+        for record in records
+        if isinstance(record, Mapping) and str(record.get("action", "")).startswith("release_replay_then_")
+    ]
+    _require(holds, "frozen detector alarm caused no held state transaction")
+    _require(replays, "frozen detector alarm caused no replayed state transaction")
+    held_proposals: dict[int, str] = {}
+    for hold in holds:
+        frame_id = hold.get("frame_id")
+        _require(isinstance(frame_id, int) and frame_id > 0, "detector hold frame is invalid")
+        _require(frame_id - 1 in alarm_positions and hold.get("prior_alarm") is True, "detector hold is not caused by the prior frozen alarm")
+        _require(
+            hold.get("pre_state_digest_sha256") != hold.get("proposed_state_digest_sha256")
+            and hold.get("committed_state_digest_sha256") == hold.get("pre_state_digest_sha256"),
+            "detector-held transaction did not restore its pre-state closure",
+        )
+        proposal = hold.get("proposed_state_digest_sha256")
+        _require(isinstance(proposal, str), "detector-held proposal digest is invalid")
+        held_proposals[frame_id] = proposal
+    for replay in replays:
+        replayed = replay.get("replayed_transaction_frame_id")
+        _require(
+            isinstance(replayed, int)
+            and replayed in held_proposals
+            and replay.get("prior_alarm") is False
+            and replay.get("pre_state_digest_sha256") == held_proposals[replayed],
+            "detector replay did not restore a held proposal before the next candidate",
+        )
+    _require(
+        all(isinstance(record, Mapping) and record.get("action") == "commit" for record in control_records),
+        "always-commit control contains a state intervention",
+    )
+    return {
+        "hold_frames": [record["frame_id"] for record in holds],
+        "replay_frames": [record["frame_id"] for record in replays],
+        "held_proposal_digests": {str(frame): digest for frame, digest in held_proposals.items()},
+    }
+
+
+def _assert_detector_alarm_source(forced_run: Mapping[str, Any]) -> tuple[list[int], dict[str, Any]]:
+    policy = forced_run.get("state_policy")
+    _require(isinstance(policy, Mapping), "detector state policy metadata is invalid")
+    source = policy.get("alarm_source")
+    _require(isinstance(source, Mapping) and source.get("kind") == "frozen_formal_v3_hybrid_alarm", "detector alarm source is missing")
+    input_artifact = source.get("input_manifest")
+    forced_input = forced_run.get("input_manifest")
+    _require(isinstance(input_artifact, Mapping) and isinstance(forced_input, Mapping), "detector alarm source input binding is missing")
+    _require(
+        all(input_artifact.get(key) == forced_input.get(key) for key in ("path", "sha256"))
+        and input_artifact.get("size_bytes") == Path(str(forced_input.get("path", ""))).stat().st_size,
+        "detector alarm source input binding differs",
+    )
+    run_artifact = source.get("run")
+    timeline_artifact = source.get("timeline")
+    _require(isinstance(run_artifact, Mapping) and isinstance(timeline_artifact, Mapping), "detector alarm source artifacts are missing")
+    evidence: dict[str, Any] = {}
+    values: dict[str, Mapping[str, Any]] = {}
+    for label, artifact in (("run", run_artifact), ("timeline", timeline_artifact)):
+        path = Path(str(artifact.get("path", "")))
+        _regular(path, label=f"detector source {label}")
+        _require((path.stat().st_mode & 0o777) == 0o444, f"detector source {label} is not frozen")
+        _require(artifact.get("sha256") == _sha256(path) and artifact.get("size_bytes") == path.stat().st_size, f"detector source {label} binding differs")
+        value = _read_json(path)
+        _require(isinstance(value, Mapping), f"detector source {label} JSON is invalid")
+        values[label] = value
+        evidence[label] = {"path": str(path.resolve()), "sha256": _sha256(path), "size_bytes": path.stat().st_size}
+    _require(values["run"].get("health_profile") == "v3", "detector source run is not v3")
+    run_input = values["run"].get("input_manifest")
+    _require(
+        isinstance(run_input, Mapping)
+        and all(run_input.get(key) == input_artifact.get(key) for key in ("path", "sha256")),
+        "detector source run input differs",
+    )
+    _require(values["timeline"].get("run_id") == "blind-wrong-order", "detector source timeline differs")
+    rows = values["timeline"].get("attribution")
+    _require(isinstance(rows, list) and len(rows) == forced_run.get("frame_count"), "detector source attribution count differs")
+    positions: list[int] = []
+    for frame_id, row in enumerate(rows):
+        _require(isinstance(row, Mapping) and row.get("frame_id") == frame_id and isinstance(row.get("hybrid_alarm"), bool), "detector source attribution row differs")
+        if row["hybrid_alarm"]:
+            positions.append(frame_id)
+    _require(positions and source.get("alarm_positions") == positions, "detector source hybrid alarm positions differ")
+    return positions, evidence
+
+
 def validate_state_policy(
     *,
     v2_control: Path,
@@ -195,11 +297,17 @@ def validate_state_policy(
     _assert_shared_run_identity(v2_run, always_run)
     _require(always_run.get("state_policy", {}).get("name") == "always-commit", "always control policy is invalid")
     _assert_shared_run_identity(always_run, forced_run)
-    _require(forced_run.get("state_policy", {}).get("name") == "forced-prior-alarm", "forced policy metadata is invalid")
+    policy_name = forced_run.get("state_policy", {}).get("name")
+    _require(policy_name in {"forced-prior-alarm", "detector-v3-prior-alarm"}, "forced policy metadata is invalid")
     always_timeline = _read_json(always_commit / "state-timeline.json")
     forced_timeline = _read_json(forced_hold / "state-timeline.json")
     _require(isinstance(always_timeline, Mapping) and isinstance(forced_timeline, Mapping), "state timeline is invalid")
-    timeline = _assert_forced_timeline(forced_timeline, always_timeline)
+    detector_source: dict[str, Any] | None = None
+    if policy_name == "forced-prior-alarm":
+        timeline = _assert_forced_timeline(forced_timeline, always_timeline)
+    else:
+        positions, detector_source = _assert_detector_alarm_source(forced_run)
+        timeline = _assert_detector_timeline(forced_timeline, always_timeline, alarm_positions=positions)
     return {
         "schema_version": "stateguard3r.recal3r-state-policy-v3-feasibility.v1",
         "status": "PASS",
@@ -216,8 +324,10 @@ def validate_state_policy(
             "bounded_hold_no_silent_drop": True,
             "always_postflight_pid_absent": True,
             "forced_postflight_pid_absent": True,
+            "detector_alarm_source_bound": policy_name != "detector-v3-prior-alarm" or detector_source is not None,
         },
         "timeline": timeline,
+        "detector_alarm_source": detector_source,
         "artifacts": {"v2": v2_artifacts, "always": always_artifacts, "forced": forced_artifacts},
         "postflight": {
             "always": _assert_postflight(always_postflight_log, pid=always_run.get("pid"), label="always"),

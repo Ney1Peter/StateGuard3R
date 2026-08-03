@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import random
+import stat
 import sys
 import time
 from typing import Any, Sequence
@@ -40,9 +41,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.set_defaults(health_profile="v2")
     parser.add_argument(
         "--state-policy",
-        choices=("always-commit", "forced-prior-alarm"),
+        choices=("always-commit", "forced-prior-alarm", "detector-v3-prior-alarm"),
         required=True,
-        help="always-commit is the equivalence control; forced-prior-alarm is feasibility-only",
+        help="always-commit is the equivalence control; detector-v3-prior-alarm consumes frozen v3 alarms",
     )
     parser.add_argument(
         "--alarm-frame",
@@ -52,6 +53,16 @@ def _parser() -> argparse.ArgumentParser:
         help="synthetic alarm position; a hold can begin only at the following frame",
     )
     parser.add_argument("--max-hold", type=int, default=3)
+    parser.add_argument(
+        "--detector-run-json",
+        type=Path,
+        help="frozen formal-v3 run.json whose input binding authorizes detector alarms",
+    )
+    parser.add_argument(
+        "--detector-alarm-timeline",
+        type=Path,
+        help="frozen formal-v3 evaluation timeline; only its hybrid_alarm field is consumed",
+    )
     return parser
 
 
@@ -82,13 +93,102 @@ def _validate_policy_args(args: argparse.Namespace, parser: argparse.ArgumentPar
         parser.error("state-policy runner requires --health-profile v2")
     if args.max_hold < 1 or args.max_hold > 3:
         parser.error("--max-hold must be in [1, 3]")
-    if args.state_policy == "always-commit" and args.alarm_frame:
-        parser.error("--alarm-frame is valid only with --state-policy forced-prior-alarm")
+    detector_paths = (args.detector_run_json, args.detector_alarm_timeline)
+    if args.state_policy == "always-commit":
+        if args.alarm_frame:
+            parser.error("--alarm-frame is valid only with an alarm-driven policy")
+        if any(path is not None for path in detector_paths):
+            parser.error("detector source arguments are valid only with --state-policy detector-v3-prior-alarm")
     if args.state_policy == "forced-prior-alarm":
         if not args.alarm_frame:
             parser.error("forced-prior-alarm requires at least one --alarm-frame")
         if any(frame < 0 for frame in args.alarm_frame):
             parser.error("--alarm-frame must be non-negative")
+        if any(path is not None for path in detector_paths):
+            parser.error("forced-prior-alarm may not use detector source arguments")
+    if args.state_policy == "detector-v3-prior-alarm":
+        if args.alarm_frame:
+            parser.error("detector-v3-prior-alarm derives alarms from frozen evidence; do not pass --alarm-frame")
+        if any(path is None for path in detector_paths):
+            parser.error("detector-v3-prior-alarm requires --detector-run-json and --detector-alarm-timeline")
+
+
+def _frozen_json(path: Path, *, label: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    resolved = path.resolve(strict=True)
+    metadata = os.lstat(resolved)
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        raise RuntimeError(f"{label} must be a regular non-symlink file")
+    if stat.S_IMODE(metadata.st_mode) != 0o444:
+        raise RuntimeError(f"{label} must be frozen mode 0444")
+    try:
+        value = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"cannot read {label}: {error}") from error
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{label} must be a JSON object")
+    return value, {
+        "path": str(resolved),
+        "sha256": smoke._sha256(resolved),
+        "size_bytes": resolved.stat().st_size,
+    }
+
+
+def _detector_v3_alarms(args: argparse.Namespace) -> tuple[list[bool], dict[str, Any]]:
+    """Bind causal policy alarms to frozen formal-v3 evidence, never labels."""
+    assert args.detector_run_json is not None and args.detector_alarm_timeline is not None
+    run, run_artifact = _frozen_json(args.detector_run_json, label="detector v3 run metadata")
+    timeline, timeline_artifact = _frozen_json(
+        args.detector_alarm_timeline, label="detector v3 evaluation timeline"
+    )
+    input_manifest = args.input_manifest.resolve(strict=True)
+    bound_input = run.get("input_manifest")
+    if not isinstance(bound_input, dict):
+        raise RuntimeError("detector v3 run lacks input-manifest binding")
+    if (
+        bound_input.get("path") != str(input_manifest)
+        or bound_input.get("sha256") != smoke._sha256(input_manifest)
+        or (
+            "size_bytes" in bound_input
+            and bound_input.get("size_bytes") != input_manifest.stat().st_size
+        )
+    ):
+        raise RuntimeError("detector v3 run is not bound to this state-policy input manifest")
+    if run.get("health_profile") != "v3":
+        raise RuntimeError("detector alarm source must be a v3 run")
+    if timeline.get("run_id") != "blind-wrong-order":
+        raise RuntimeError("detector alarm timeline must be the disclosed blind-wrong-order formal timeline")
+    attribution = timeline.get("attribution")
+    if not isinstance(attribution, list) or not attribution:
+        raise RuntimeError("detector alarm timeline lacks attribution rows")
+    alarms: list[bool] = []
+    for frame_id, row in enumerate(attribution):
+        if not isinstance(row, dict) or set(row) != {
+            "frame_id", "continuous_alarm", "timestamp_order_alarm", "hybrid_alarm"
+        }:
+            raise RuntimeError(f"detector attribution row {frame_id} schema differs")
+        if row.get("frame_id") != frame_id or not all(
+            isinstance(row.get(name), bool)
+            for name in ("continuous_alarm", "timestamp_order_alarm", "hybrid_alarm")
+        ):
+            raise RuntimeError(f"detector attribution row {frame_id} is invalid")
+        # Labels and corruption fields in the evaluated timeline are deliberately
+        # never referenced: the policy receives only the frozen hybrid decision.
+        alarms.append(row["hybrid_alarm"])
+    positions = [index for index, alarm in enumerate(alarms) if alarm]
+    if not positions:
+        raise RuntimeError("detector alarm source contains no hybrid alarms")
+    return alarms, {
+        "kind": "frozen_formal_v3_hybrid_alarm",
+        "run": run_artifact,
+        "timeline": timeline_artifact,
+        "input_manifest": {
+            "path": str(input_manifest),
+            "sha256": smoke._sha256(input_manifest),
+            "size_bytes": input_manifest.stat().st_size,
+        },
+        "alarm_positions": positions,
+        "causality": "policy reads only alarm_t_minus_1; labels and event metadata are not consumed",
+    }
 
 
 def _freeze_output_tree(output_dir: Path) -> None:
@@ -207,11 +307,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     model._compute_recal3r_update_mask = counted_update
     alarms = [False] * len(views)
+    alarm_source: dict[str, Any] | None = None
     if args.state_policy == "forced-prior-alarm":
         for frame in args.alarm_frame:
             if frame >= len(views):
                 parser.error(f"--alarm-frame {frame} is outside {len(views)} frames")
             alarms[frame] = True
+    elif args.state_policy == "detector-v3-prior-alarm":
+        alarms, alarm_source = _detector_v3_alarms(args)
+        if len(alarms) != len(views):
+            raise RuntimeError("frozen detector alarm count does not equal state-policy input frame count")
 
     device = torch.device(args.device)
     if device.type == "cuda":
@@ -294,7 +399,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "policy": args.state_policy,
         "max_hold": args.max_hold,
         "alarm_positions": [index for index, value in enumerate(alarms) if value],
-        "alarm_semantics": "synthetic feasibility control; frame t alarm can only affect update t+1",
+        "alarm_semantics": (
+            "synthetic feasibility control; frame t alarm can only affect update t+1"
+            if alarm_source is None
+            else "frozen formal Detector v3 hybrid alarm; frame t alarm can only affect update t+1"
+        ),
+        "alarm_source": alarm_source,
         "source_provenance": result.source_provenance,
         "transactions": result.timeline,
         "dropped_transaction_frame_ids": result.dropped_transaction_frame_ids,
@@ -339,6 +449,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "causality": "decision_for_frame_t_reads_only_alarm_t_minus_1",
             "timeline_path": str(args.output_dir / "state-timeline.json"),
             "timeline_sha256": smoke._sha256(args.output_dir / "state-timeline.json"),
+            "alarm_source": alarm_source,
         },
         "runtime_seconds": elapsed,
         "runtime_scope": "external_transactional_recurrent_lighter_only",
