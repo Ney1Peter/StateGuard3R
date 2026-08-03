@@ -1740,6 +1740,19 @@ launched or created.
   byte-identical; v3 adds only a valid, input-bound `timestamp-order.json` sidecar.
 - Full audit: `docs/audits/detector-v3-instrumentation-audit.md`.
 
+### STATE-POLICY-V3-FEASIBILITY-0003: external transactional hold/replay
+
+- Status: **PASS**, scope `TRANSACTIONAL_STATE_POLICY_VALIDATED_NO_RECOVERY_QUALITY_CLAIM`.
+- Disclosed 30-frame development input only; the detector signal was synthetically forced
+  at frame 1 for the intervention control, so this is not recovery or detection evidence.
+- The always-commit external wrapper is byte-identical to the v2 control for checkpoint,
+  health, prediction summary and trajectory. The forced run held frame-2 state, restored
+  the complete pre-state closure, then replayed it at frame 3 after a clear prior score.
+- Outputs: `outputs/state-policy-v3-always-commit-0003`,
+  `outputs/state-policy-v3-forced-hold-0003`, and immutable CPU result
+  `outputs/state-policy-v3-feasibility-0003`.
+- Full audit: `docs/audits/recal3r-state-policy-v3-feasibility.md`.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
