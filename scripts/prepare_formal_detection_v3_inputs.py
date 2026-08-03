@@ -103,6 +103,14 @@ def _require(condition: bool, message: str) -> None:
         raise FormalV3InputError(message)
 
 
+def _enable_stateguard_src() -> Path:
+    """Expose the local StateGuard3R package to the reused ReCal3R CPU env."""
+    source = ROOT / "src"
+    if str(source) not in sys.path:
+        sys.path.insert(0, str(source))
+    return source
+
+
 def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
@@ -372,6 +380,7 @@ def _select_low_overlap_donor(
 ) -> tuple[int, list[float]]:
     """Use GT only to choose the fixed low-overlap donor, never online."""
 
+    _enable_stateguard_src()
     from stateguard3r.visual_overlap import gt_depth_reprojection_overlap
 
     used_rgb = {
@@ -699,9 +708,7 @@ def _build_manifest(
     source_sha256: str,
     sequence: str,
 ) -> dict[str, Any]:
-    state_src = ROOT / "src"
-    if str(state_src) not in sys.path:
-        sys.path.insert(0, str(state_src))
+    _enable_stateguard_src()
     from stateguard3r.corruption import build_corruption_manifest
 
     return build_corruption_manifest(
