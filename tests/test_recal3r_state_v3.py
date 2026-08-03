@@ -59,6 +59,8 @@ def _transaction(frame_id: int) -> StateTransaction:
         post_state=_closure(float(frame_id + 1)),
         pre_model=capture_model_state(model),
         post_model=capture_model_state(model),
+        pre_reset_mask=False,
+        post_reset_mask=False,
     )
 
 
