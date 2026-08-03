@@ -165,6 +165,7 @@ def test_detector_policy_reads_only_frozen_hybrid_alarm_and_bound_input(tmp_path
         )
     )
 
-    assert alarms == [False, True, True]
-    assert source["alarm_positions"] == [1, 2]
+    assert alarms == [False, True, False]
+    assert source["hybrid_alarm_positions"] == [1, 2]
+    assert source["policy_alarm_positions"] == [1]
     assert source["causality"].endswith("not consumed")
