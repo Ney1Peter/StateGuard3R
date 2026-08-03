@@ -209,7 +209,10 @@ def _assert_postflight(log_path: Path, *, run_pid: Any, label: str) -> dict[str,
     _assert_regular_file(log_path, label=f"{label} postflight log")
     _require(isinstance(run_pid, int) and not isinstance(run_pid, bool), f"{label} run PID is invalid")
     text = log_path.read_text(encoding="utf-8")
-    _require("NVIDIA-SMI" in text, f"{label} postflight log has no nvidia-smi snapshot")
+    _require(
+        "NVIDIA-SMI" in text or "NVSMI LOG" in text,
+        f"{label} postflight log has no nvidia-smi snapshot",
+    )
     _require(str(run_pid) not in text, f"{label} run PID {run_pid} is still listed in its postflight log")
     return {
         "path": str(log_path.resolve()),
