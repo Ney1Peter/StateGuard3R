@@ -375,7 +375,13 @@ def _verify_runtime_binding(commitment: Mapping[str, Any]) -> None:
         _artifact(current, expected.get(name, {}), name=f"v3 committed {name}")
 
 
-def commit_inputs(input_root: Path, output_dir: Path, *, protocol: Path) -> dict[str, Any]:
+def commit_inputs(
+    input_root: Path,
+    output_dir: Path,
+    *,
+    protocol: Path,
+    validation_dir: Path,
+) -> dict[str, Any]:
     """Freeze v3 sources, fixed v2 configuration, inputs, and CPU readiness."""
 
     _require(input_root.resolve(strict=True) == V3_INPUTS.resolve(strict=True), "formal v3 must use frozen inputs 0001")
@@ -393,7 +399,7 @@ def commit_inputs(input_root: Path, output_dir: Path, *, protocol: Path) -> dict
     specs = _run_specs()
     registry = _read(V3_INPUTS / "formal-v3-manifest.json", name="v3 input registry", mode=0o444)
     registry_value = _strict_json(registry.payload, name="v3 input registry")
-    _require(registry_value.get("status") == "pre_forward_blind_holdout_inputs", "v3 inputs are not pre-forward blind inputs")
+    _require(registry_value.get("status") == "pre_forward_blind_formal_v3_inputs", "v3 inputs are not pre-forward blind inputs")
     archive_value = registry_value.get("archive")
     acquisition_value = registry_value.get("acquisition")
     _require(isinstance(archive_value, Mapping) and isinstance(acquisition_value, Mapping), "v3 input archive/acquisition provenance missing")
@@ -407,26 +413,15 @@ def commit_inputs(input_root: Path, output_dir: Path, *, protocol: Path) -> dict
     _require(_strict_json(development.payload, name="Detector v3 development readiness").get("status") == "PASS", "Detector v3 development readiness is not PASS")
     opencv = _opencv_provenance()
 
-    staging = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.validator.", suffix=".staging", dir=OUTPUTS))
-    try:
-        validation_dir = staging / "cpu-validation"
-        environment = {**os.environ, "CUDA_VISIBLE_DEVICES": "", "TMPDIR": str(ROOT / "tmp")}
-        subprocess.run([str(ROOT / ".venv" / "bin" / "python"), str(VALIDATOR), str(V3_INPUTS), str(validation_dir)], cwd=ROOT, env=environment, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        report = _read(validation_dir / "cpu-validation.json", name="fresh v3 CPU validation", mode=0o444)
-        report_value = _strict_json(report.payload, name="fresh v3 CPU validation")
-        checks = report_value.get("checks")
-        _require(report_value.get("status") == "PASS" and isinstance(checks, Mapping), "fresh v3 CPU validation did not pass")
-        _require(checks.get("cuda_hidden") is True and checks.get("cuda_uninitialized") is True, "fresh v3 CPU validation used CUDA")
-        _require(report_value.get("validator", {}).get("sha256") == _sha_bytes(snapshots["input_validator"].payload), "v3 CPU validation did not use committed validator bytes")
-    except subprocess.CalledProcessError as error:
-        raise FormalV3Error(f"fresh formal-v3 CPU validation failed: {error.stderr}") from error
-    finally:
-        if staging.exists():
-            for path in sorted(staging.rglob("*"), key=lambda item: len(item.parts), reverse=True):
-                if path.is_dir():
-                    path.chmod(0o755)
-            staging.chmod(0o755)
-            shutil.rmtree(staging)
+    validation_root = validation_dir.resolve(strict=True)
+    _require(validation_root.parent == OUTPUTS and validation_root.is_dir() and not validation_root.is_symlink(), "v3 CPU validation must be a direct immutable outputs child")
+    _require(stat.S_IMODE(os.lstat(validation_root).st_mode) == 0o555, "v3 CPU validation directory is not frozen")
+    report = _read(validation_root / "cpu-validation.json", name="frozen v3 CPU validation", mode=0o444)
+    report_value = _strict_json(report.payload, name="frozen v3 CPU validation")
+    checks = report_value.get("checks")
+    _require(report_value.get("status") == "PASS" and isinstance(checks, Mapping), "frozen v3 CPU validation did not pass")
+    _require(checks.get("cuda_hidden") is True, "frozen v3 CPU validation did not hide CUDA")
+    _require(report_value.get("validator", {}).get("sha256") == _sha_bytes(snapshots["input_validator"].payload), "v3 CPU validation did not use committed validator bytes")
 
     rows = [
         {
@@ -462,7 +457,7 @@ def commit_inputs(input_root: Path, output_dir: Path, *, protocol: Path) -> dict
         "checkpoint": {"path": str(CHECKPOINT), "sha256": CHECKPOINT_SHA256, "size_bytes": CHECKPOINT.stat().st_size},
         "v3_fixed_configuration": config,
         "development_evidence": development.artifact(str(V3_DEVELOPMENT)),
-        "new_scene_inputs": {"registry": registry.artifact("formal-v3-manifest.json"), "archive": archive.artifact(str(archive.path)), "acquisition": acquisition.artifact(str(acquisition.path)), "cpu_validation": report.artifact("cpu-validation.json")},
+        "new_scene_inputs": {"registry": registry.artifact("formal-v3-manifest.json"), "archive": archive.artifact(str(archive.path)), "acquisition": acquisition.artifact(str(acquisition.path)), "cpu_validation": report.artifact(str(validation_root / "cpu-validation.json"))},
         "production_opencv": opencv,
         "run_registry": rows,
         "execution_order": execution_order,
@@ -473,10 +468,10 @@ def commit_inputs(input_root: Path, output_dir: Path, *, protocol: Path) -> dict
     commitment["artifacts"] = {
         "run_registry": {"path": "run-registry.json", "sha256": _sha_bytes(registry_bytes), "size_bytes": len(registry_bytes)},
         "blind_commitment": {"path": "blind-commitment.json", "sha256": _sha_bytes(blind_bytes), "size_bytes": len(blind_bytes)},
-        "cpu_validation": report.artifact("cpu-validation.json"),
+        "cpu_validation": report.artifact(str(validation_root / "cpu-validation.json")),
     }
     commitment_bytes = _json_bytes(commitment)
-    output = _publish(output_dir, {"commitment-manifest.json": commitment_bytes, "run-registry.json": registry_bytes, "blind-commitment.json": blind_bytes, "cpu-validation.json": report.payload})
+    output = _publish(output_dir, {"commitment-manifest.json": commitment_bytes, "run-registry.json": registry_bytes, "blind-commitment.json": blind_bytes})
     return {"stage": "commit", "output_dir": str(output), "commitment_sha256": _sha_bytes(commitment_bytes)}
 
 
@@ -574,6 +569,7 @@ def _validate_timestamp_sidecar(snapshot: Snapshot, run_json: Mapping[str, Any],
     except TimestampOrderError as error:
         raise FormalV3Error(f"{spec.run_id} timestamp sidecar is invalid: {error}") from error
     _require(len(predicates) == 30, f"{spec.run_id} timestamp sidecar frame count")
+    _require(not any(value is True for value in predicates[:15]), f"{spec.run_id} timestamp sidecar has a clean-prefix violation")
     metadata = run_json.get("capture_timestamp_order")
     _require(isinstance(metadata, Mapping) and set(metadata) == {"path", "sha256", "schema_version", "purpose", "violation_positions"}, f"{spec.run_id} timestamp sidecar metadata")
     _require(Path(str(metadata["path"])).resolve(strict=False) == snapshot.path.resolve(strict=False), f"{spec.run_id} timestamp sidecar path")
@@ -887,7 +883,7 @@ def evaluate_holdout(input_root: Path, commit_dir: Path, calibration_dir: Path, 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest="command", required=True)
-    commit = actions.add_parser("commit"); commit.add_argument("input_root", type=Path); commit.add_argument("output_dir", type=Path); commit.add_argument("--protocol", type=Path, required=True)
+    commit = actions.add_parser("commit"); commit.add_argument("input_root", type=Path); commit.add_argument("output_dir", type=Path); commit.add_argument("--protocol", type=Path, required=True); commit.add_argument("--validation-dir", type=Path, required=True)
     calibrate = actions.add_parser("calibrate"); calibrate.add_argument("input_root", type=Path); calibrate.add_argument("commit_dir", type=Path); calibrate.add_argument("runs_root", type=Path); calibrate.add_argument("output_dir", type=Path)
     evaluate = actions.add_parser("evaluate"); evaluate.add_argument("input_root", type=Path); evaluate.add_argument("commit_dir", type=Path); evaluate.add_argument("calibration_dir", type=Path); evaluate.add_argument("runs_root", type=Path); evaluate.add_argument("output_dir", type=Path)
     launch = actions.add_parser("launch"); launch.add_argument("commit_dir", type=Path); launch.add_argument("runs_root", type=Path); launch.add_argument("records_root", type=Path); launch.add_argument("log_dir", type=Path); launch.add_argument("run_id"); launch.add_argument("--gpu-id", required=True, type=int); launch.add_argument("--calibration-dir", type=Path)
@@ -898,7 +894,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_arg_parser(); args = parser.parse_args(argv)
     try:
         if args.command == "commit":
-            result = commit_inputs(args.input_root, args.output_dir, protocol=args.protocol)
+            result = commit_inputs(args.input_root, args.output_dir, protocol=args.protocol, validation_dir=args.validation_dir)
         elif args.command == "calibrate":
             result = calibrate_development(args.input_root, args.commit_dir, args.runs_root, args.output_dir)
         elif args.command == "evaluate":
