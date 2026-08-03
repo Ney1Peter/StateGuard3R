@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -8,6 +10,7 @@ import sys
 import pytest
 
 from scripts.run_recal3r_state_policy_v3 import (
+    _detector_v3_alarms,
     _parser,
     _run_without_grad,
     _validate_policy_args,
@@ -24,6 +27,8 @@ def _policy_args(**overrides: object) -> argparse.Namespace:
         "max_hold": 3,
         "state_policy": "always-commit",
         "alarm_frame": [],
+        "detector_run_json": None,
+        "detector_alarm_timeline": None,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -36,6 +41,14 @@ def test_state_policy_parser_defaults_to_v2_and_accepts_control_modes() -> None:
     _validate_policy_args(_policy_args(), parser)
     _validate_policy_args(
         _policy_args(state_policy="forced-prior-alarm", alarm_frame=[1, 4]), parser
+    )
+    _validate_policy_args(
+        _policy_args(
+            state_policy="detector-v3-prior-alarm",
+            detector_run_json=Path("run.json"),
+            detector_alarm_timeline=Path("timeline.json"),
+        ),
+        parser,
     )
 
 
@@ -82,6 +95,13 @@ def test_state_policy_forward_runs_inside_no_grad_context() -> None:
         _policy_args(alarm_frame=[1]),
         _policy_args(state_policy="forced-prior-alarm", alarm_frame=[]),
         _policy_args(state_policy="forced-prior-alarm", alarm_frame=[-1]),
+        _policy_args(state_policy="detector-v3-prior-alarm"),
+        _policy_args(
+            state_policy="detector-v3-prior-alarm",
+            alarm_frame=[1],
+            detector_run_json=Path("run.json"),
+            detector_alarm_timeline=Path("timeline.json"),
+        ),
     ],
 )
 def test_state_policy_parser_rejects_unsafe_or_ambiguous_controls(
@@ -104,3 +124,47 @@ def test_transactional_runner_rejects_misaligned_alarm_sequence_before_execution
             alarms=[],
             verify_source=False,
         )
+
+
+def test_detector_policy_reads_only_frozen_hybrid_alarm_and_bound_input(tmp_path: Path) -> None:
+    input_manifest = tmp_path / "input-manifest.json"
+    input_manifest.write_text("{}\n", encoding="utf-8")
+    run = tmp_path / "run.json"
+    run.write_text(
+        json.dumps(
+            {
+                "health_profile": "v3",
+                "input_manifest": {
+                    "path": str(input_manifest),
+                    "sha256": hashlib.sha256(input_manifest.read_bytes()).hexdigest(),
+                    "size_bytes": input_manifest.stat().st_size,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    timeline = tmp_path / "timeline.json"
+    timeline.write_text(
+        '{"run_id":"blind-wrong-order","labels":[99,99,99],"attribution":['
+        '{"frame_id":0,"continuous_alarm":false,"timestamp_order_alarm":false,"hybrid_alarm":false},'
+        '{"frame_id":1,"continuous_alarm":true,"timestamp_order_alarm":false,"hybrid_alarm":true},'
+        '{"frame_id":2,"continuous_alarm":false,"timestamp_order_alarm":true,"hybrid_alarm":true}'
+        ']}\n',
+        encoding="utf-8",
+    )
+    for path in (input_manifest, run, timeline):
+        path.chmod(0o444)
+
+    alarms, source = _detector_v3_alarms(
+        _policy_args(
+            state_policy="detector-v3-prior-alarm",
+            input_manifest=input_manifest,
+            detector_run_json=run,
+            detector_alarm_timeline=timeline,
+        )
+    )
+
+    assert alarms == [False, True, True]
+    assert source["alarm_positions"] == [1, 2]
+    assert source["causality"].endswith("not consumed")
