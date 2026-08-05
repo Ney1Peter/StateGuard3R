@@ -1781,6 +1781,29 @@ launched or created.
   `outputs/state-policy-v3-detector-feasibility-0005`.
 - Full audit: `docs/audits/recal3r-state-policy-v3-feasibility.md`.
 
+### RECOVERY-QUALITY-V1-0001: two-scene formal recovery-quality validation
+
+- Status: **completed — `RECOVERY_QUALITY_NO_GO`**.  This is a complete quality result, not a
+  feasibility failure; no follow-up forward, retune, or repeat is authorized by this record.
+- Frozen commitment: `outputs/recovery-quality-formal-commitment-0001/commitment.json`, SHA-256
+  `001f41d9e8619d652ca1d9f0782d857257de30476c97064c7b67e2db0c590646`.
+- Bound source: StateGuard3R `a115efbd26dce0b8966228ce5c558ed872fd30a3`; ReCal3R
+  `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`; checkpoint
+  `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103`.
+- Matrix: two no-response-before-commit TUM scenes × clean/dynamic/wrong-order/low-overlap ×
+  baseline/always-commit/detector-policy = 24 serial GPU forwards; all exited zero, evaluator
+  provenance/equivalence passed 8/8, and restore failures were 0/8.
+- Sole aggregation: `outputs/recovery-quality-formal-aggregation-0001`, result SHA-256
+  `88a6d50771211dae43ee8340bbcf7682a29f4dc7df968cf9be2e0946fd1db934`, attempt-seal SHA-256
+  `1a5259298cb84743cd379059e055689a47244e117ab2485b695a60a728aa8204`.  Directory is `0555` and
+  both files are `0444`; no second aggregation attempt exists.
+- Decision facts: all six event ATE and translation-RPE effects were `0.0`; positive ATE was 0/6;
+  both bootstrap lower bounds were `0.0`; policy/baseline runtime median ratio was `1.7210640716`
+  (limit 1.20).  Clean degradation, wrong-order hold/replay and no-restore-failure gates passed.
+- Audit: [recovery-quality-v1-result.md](../audits/recovery-quality-v1-result.md).  It records the
+  retained two CPU-only alarm import-path failures before the one accepted output and the shadow
+  replay limitation; no successful formal artifact was overwritten or rerun.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.

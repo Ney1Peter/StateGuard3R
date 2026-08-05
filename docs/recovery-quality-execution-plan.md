@@ -1,7 +1,7 @@
 # StateGuard3R Detector v3：独立恢复质量验证执行计划
 
 - 制定并激活日期：2026-08-06
-- 状态：**执行中**
+- 状态：**已完成：`RECOVERY_QUALITY_NO_GO`**
 - 长时目标窗口：预计 12--18 小时；不以时间耗尽为停止条件
 - 前置结论：[Detector v3 正式 GO](audits/formal-v3-result.md)，以及
   [state-policy transaction 已验证](audits/recal3r-state-policy-v3-feasibility.md)
@@ -178,11 +178,11 @@ frame/GT 绑定、prefix-only 行为、错误四元数/退化/缺帧拒绝和 no
 
 ## 5. 当前执行指针
 
-当前处于 **Gate B / formal input re-freeze**：scene B 的唯一允许 archive acquisition 已 PASS，
-archive/raw tree 已冻结；`fr3_walking_static` 也保持只读且没有 ReCal3R response。一次 pre-commit
-scene A builder 尝试发现官方 static GT 的重复最近邻行，现已以既有 formal-v2 一致的
-“拒绝该 RGB 行、从有效 block 决定性选择”语义修复并审计。较早生成的 scene B input candidate
-不会覆盖或作为本轮 commitment 输入；两个场景将用同一最新提交重新生成新编号、独立验证后才
-commit。另已补齐 commitment 被 runner/alarm/evaluator/aggregate 强制消费的验证链。
+**Gate A--D 已完成。** 两个 scene 的 `-inputs-0002` 与 validator 均已冻结，随后唯一
+`recovery-quality-formal-commitment-0001` 绑定 8 个 inputs 与 24 个 forwards。所有正式 forward、
+evaluator 和唯一 aggregation 已成功并冻结；aggregate seal 的决定为
+`RECOVERY_QUALITY_NO_GO`。完整的数值、失败门禁、异常恢复记录及解释边界见
+[recovery-quality-v1-result.md](audits/recovery-quality-v1-result.md)。
 
-尚未读取或产生本计划 scene A/B 的模型 response。
+这个 NO-GO 是本计划定义的正常终止状态。不得以本轮 formal inputs 或 outputs 调参、重跑、覆盖或
+新增 aggregation attempt。
