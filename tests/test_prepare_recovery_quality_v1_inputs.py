@@ -83,6 +83,26 @@ def test_prepare_requires_cuda_disabled_and_readonly_raw(tmp_path: Path, monkeyp
         prepare.prepare(raw, output_root / "quality-inputs-0002", dataset_id=raw.name)
 
 
+def test_prepare_excludes_a_frame_with_a_nonunique_nearest_gt_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = _tum_dataset(tmp_path)
+    gt_path = raw / "groundtruth.txt"
+    gt_path.chmod(0o644)
+    with gt_path.open("a", encoding="ascii") as stream:
+        stream.write("1.666667 1.666667 0 0 0 0 0 1\n")
+    gt_path.chmod(0o444)
+    output_root = tmp_path / "outputs"
+    output_root.mkdir()
+    monkeypatch.setattr(prepare, "OUTPUT_ROOT", output_root)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    frames = prepare.associated_frames(raw)
+    assert frames[50] is None
+    output = prepare.prepare(raw, output_root / "quality-inputs-0001", dataset_id=raw.name)
+    registry = json.loads((output / "recovery-quality-inputs.json").read_text())
+    assert registry["base_start_rgb_row"] <= 50 - 30 or registry["base_start_rgb_row"] > 50
+
+
 def test_prepare_cli_passes_positional_output_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured: dict[str, object] = {}
 
