@@ -12,6 +12,7 @@ import pytest
 from scripts.run_recal3r_state_policy_v3 import (
     _detector_v3_alarms,
     _parser,
+    _quality_v1_alarms,
     _run_without_grad,
     _validate_policy_args,
 )
@@ -29,6 +30,7 @@ def _policy_args(**overrides: object) -> argparse.Namespace:
         "alarm_frame": [],
         "detector_run_json": None,
         "detector_alarm_timeline": None,
+        "quality_alarm_artifact": None,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -41,6 +43,13 @@ def test_state_policy_parser_defaults_to_v2_and_accepts_control_modes() -> None:
     _validate_policy_args(_policy_args(), parser)
     _validate_policy_args(
         _policy_args(state_policy="forced-prior-alarm", alarm_frame=[1, 4]), parser
+    )
+    _validate_policy_args(
+        _policy_args(
+            state_policy="detector-v3-quality-prior-alarm",
+            quality_alarm_artifact=Path("alarm.json"),
+        ),
+        parser,
     )
     _validate_policy_args(
         _policy_args(
@@ -96,6 +105,7 @@ def test_state_policy_forward_runs_inside_no_grad_context() -> None:
         _policy_args(state_policy="forced-prior-alarm", alarm_frame=[]),
         _policy_args(state_policy="forced-prior-alarm", alarm_frame=[-1]),
         _policy_args(state_policy="detector-v3-prior-alarm"),
+        _policy_args(state_policy="detector-v3-quality-prior-alarm"),
         _policy_args(
             state_policy="detector-v3-prior-alarm",
             alarm_frame=[1],
@@ -167,5 +177,43 @@ def test_detector_policy_reads_only_frozen_hybrid_alarm_and_bound_input(tmp_path
 
     assert alarms == [False, True, False]
     assert source["hybrid_alarm_positions"] == [1, 2]
+    assert source["policy_alarm_positions"] == [1]
+    assert source["causality"].endswith("not consumed")
+
+
+def test_quality_detector_policy_reads_only_bound_attribution(tmp_path: Path) -> None:
+    input_manifest = tmp_path / "input-manifest.json"
+    input_manifest.write_text("{}\n", encoding="utf-8")
+    artifact = tmp_path / "alarm.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": "stateguard3r.recovery-quality-alarm.v1",
+                "input_manifest": {
+                    "path": str(input_manifest),
+                    "sha256": hashlib.sha256(input_manifest.read_bytes()).hexdigest(),
+                },
+                "attribution": [
+                    {"frame_id": 0, "continuous_alarm": False, "timestamp_order_alarm": False, "hybrid_alarm": False},
+                    {"frame_id": 1, "continuous_alarm": True, "timestamp_order_alarm": False, "hybrid_alarm": True},
+                    {"frame_id": 2, "continuous_alarm": False, "timestamp_order_alarm": True, "hybrid_alarm": True},
+                ],
+                "policy_alarm_positions": [1],
+                "policy_filter": "causal_hybrid_alarm_rising_edge",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    input_manifest.chmod(0o444)
+    artifact.chmod(0o444)
+    alarms, source = _quality_v1_alarms(
+        _policy_args(
+            state_policy="detector-v3-quality-prior-alarm",
+            input_manifest=input_manifest,
+            quality_alarm_artifact=artifact,
+        )
+    )
+    assert alarms == [False, True, False]
     assert source["policy_alarm_positions"] == [1]
     assert source["causality"].endswith("not consumed")
