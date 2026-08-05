@@ -31,6 +31,7 @@ def _policy_args(**overrides: object) -> argparse.Namespace:
         "detector_run_json": None,
         "detector_alarm_timeline": None,
         "quality_alarm_artifact": None,
+        "recovery_quality_commitment": None,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -106,6 +107,11 @@ def test_state_policy_forward_runs_inside_no_grad_context() -> None:
         _policy_args(state_policy="forced-prior-alarm", alarm_frame=[-1]),
         _policy_args(state_policy="detector-v3-prior-alarm"),
         _policy_args(state_policy="detector-v3-quality-prior-alarm"),
+        _policy_args(
+            state_policy="forced-prior-alarm",
+            alarm_frame=[1],
+            recovery_quality_commitment=Path("commitment.json"),
+        ),
         _policy_args(
             state_policy="detector-v3-prior-alarm",
             alarm_frame=[1],

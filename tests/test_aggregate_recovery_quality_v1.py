@@ -53,3 +53,15 @@ def test_aggregate_requires_exact_inventory_and_seals_one_go_result(tmp_path: Pa
     assert result["decision"] == "RECOVERY_QUALITY_GO"
     assert result["gates"]["wrong_order_hold_and_replay_each_scene"] is True
     assert (output / "attempt-seal.json").stat().st_mode & 0o777 == 0o444
+
+
+def test_aggregation_cli_accepts_frozen_commitment(tmp_path: Path, monkeypatch) -> None:
+    captured: list[object] = []
+
+    def fake(values, commitment, output):
+        captured.extend((values, commitment, output))
+        return output
+
+    monkeypatch.setattr(aggregate, "aggregate", fake)
+    assert aggregate.main(["--recovery-quality-commitment", "commitment.json", "--evaluation", f"{aggregate.SCENES[0]}=clean=one", str(tmp_path / "out")]) == 0
+    assert captured[-1] == tmp_path / "out"

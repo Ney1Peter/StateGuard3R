@@ -75,6 +75,10 @@ def test_static_validation_freezes_clean_official_baseline(tmp_path: Path) -> No
     assert not args.output_dir.exists()
 
 
+def test_smoke_parser_exposes_frozen_recovery_quality_commitment() -> None:
+    assert "--recovery-quality-commitment" in _parser().format_help()
+
+
 def test_v2_profile_is_explicit_and_copies_causal_overlap_without_view_mutation() -> None:
     parser = _parser()
     assert parser.get_default("health_profile") == "v1"

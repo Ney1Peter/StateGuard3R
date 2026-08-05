@@ -97,5 +97,5 @@ def test_evaluator_cli_passes_positional_output_dir(monkeypatch: pytest.MonkeyPa
         return args[-1]
 
     monkeypatch.setattr(evaluate, "evaluate", fake)
-    assert evaluate.main(["--input-manifest", "a", "--baseline-dir", "b", "--always-commit-dir", "c", "--policy-dir", "d", str(tmp_path / "out")]) == 0
+    assert evaluate.main(["--input-manifest", "a", "--baseline-dir", "b", "--always-commit-dir", "c", "--policy-dir", "d", "--recovery-quality-commitment", "commitment.json", str(tmp_path / "out")]) == 0
     assert captured[-1] == tmp_path / "out"

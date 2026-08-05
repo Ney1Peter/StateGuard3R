@@ -102,5 +102,5 @@ def test_alarm_cli_passes_positional_output_dir(monkeypatch: pytest.MonkeyPatch,
         return args[-1]
 
     monkeypatch.setattr(alarm, "build", fake)
-    assert alarm.main(["--input-manifest", "a", "--baseline-dir", "b", "--formal-config", "c", "--rgb-listing", "d", "--dataset-root", "e", str(tmp_path / "out")]) == 0
+    assert alarm.main(["--input-manifest", "a", "--baseline-dir", "b", "--formal-config", "c", "--rgb-listing", "d", "--dataset-root", "e", "--recovery-quality-commitment", "commitment.json", str(tmp_path / "out")]) == 0
     assert captured[-1] == tmp_path / "out"
