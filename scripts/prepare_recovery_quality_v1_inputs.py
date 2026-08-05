@@ -86,6 +86,14 @@ def _artifact(path: Path) -> dict[str, Any]:
     }
 
 
+def _published_artifact(staged_path: Path, published_path: Path) -> dict[str, Any]:
+    """Hash a staged immutable file while binding the path after atomic publish."""
+
+    artifact = _artifact(staged_path)
+    artifact["path"] = str(published_path)
+    return artifact
+
+
 def _regular(path: Path, *, label: str, mode: int | None = None) -> Path:
     try:
         metadata = os.lstat(path)
@@ -356,7 +364,18 @@ def prepare(dataset_root: Path, output_dir: Path, *, dataset_id: str) -> Path:
 
             loaded = load_input_manifest(input_path)
             _require(len(loaded.frames) == FRAME_COUNT, f"{condition} strict input replay differs")
-            records.append({"condition": condition, "directory": condition, "source_manifest": _artifact(source_path), "input_manifest": _artifact(input_path)})
+            records.append(
+                {
+                    "condition": condition,
+                    "directory": condition,
+                    "source_manifest": _published_artifact(
+                        source_path, output / condition / "source-manifest.json"
+                    ),
+                    "input_manifest": _published_artifact(
+                        input_path, output / condition / "input-manifest.json"
+                    ),
+                }
+            )
         registry = {
             "schema_version": REGISTRY_SCHEMA,
             "status": "pre_forward_recovery_quality_inputs",
