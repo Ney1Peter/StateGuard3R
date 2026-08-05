@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 
 from scripts import acquire_recovery_quality_scene_b as scene_b
 from scripts import acquire_tum_v2_holdout as tum
@@ -34,3 +36,10 @@ def test_scene_b_cli_accepts_preflight_and_acquire_paths(tmp_path: Path, monkeyp
     monkeypatch.setattr(scene_b, "acquire", fake_acquire)
     assert scene_b.main(["acquire", str(tmp_path / "pre"), str(tmp_path / "out")]) == 0
     assert captured["acquire_output"] == tmp_path / "out"
+
+
+def test_scene_b_script_is_directly_importable_outside_repository(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "acquire_recovery_quality_scene_b.py"
+    completed = subprocess.run([sys.executable, str(script), "--help"], cwd=tmp_path, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    assert completed.returncode == 0, completed.stderr
+    assert "preflight" in completed.stdout
