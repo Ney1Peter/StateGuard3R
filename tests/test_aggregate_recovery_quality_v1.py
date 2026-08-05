@@ -48,7 +48,7 @@ def test_aggregate_requires_exact_inventory_and_seals_one_go_result(tmp_path: Pa
         for condition in aggregate.CONDITIONS:
             effect = 0.2 if condition != "clean" else 0.0
             values[(scene, condition)] = _evaluation(tmp_path / f"{scene}-{condition}", scene=scene, condition=condition, effect=effect)
-    output = aggregate.aggregate(values, outputs / "result-0001")
+    output = aggregate.aggregate(values, None, outputs / "result-0001")
     result = json.loads((output / "result.json").read_text())
     assert result["decision"] == "RECOVERY_QUALITY_GO"
     assert result["gates"]["wrong_order_hold_and_replay_each_scene"] is True
