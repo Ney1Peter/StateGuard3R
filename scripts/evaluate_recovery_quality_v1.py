@@ -139,7 +139,14 @@ def _gt_arrays(manifest_payload: Mapping[str, Any]) -> tuple[Any, Any]:
     return np.asarray(positions, dtype=np.float64), np.stack(rotations)
 
 
-def evaluate(input_manifest: Path, baseline_dir: Path, always_commit_dir: Path, policy_dir: Path, output_dir: Path) -> Path:
+def evaluate(
+    input_manifest: Path,
+    baseline_dir: Path,
+    always_commit_dir: Path,
+    policy_dir: Path,
+    output_dir: Path,
+    recovery_quality_commitment: Path | None = None,
+) -> Path:
     """Write one immutable triple comparison after validating every binding."""
 
     manifest = _regular(input_manifest, label="input manifest", mode=0o444)
@@ -155,6 +162,31 @@ def evaluate(input_manifest: Path, baseline_dir: Path, always_commit_dir: Path, 
     policy_run, policy_trajectory = _run_bindings(policy, manifest, label="detector-policy")
     _require(always_run.get("state_policy", {}).get("name") == "always-commit", "always control has wrong policy")
     _require(policy_run.get("state_policy", {}).get("name") == "detector-v3-quality-prior-alarm", "policy run has wrong state policy")
+    recovery_trial: dict[str, Any] | None = None
+    if recovery_quality_commitment is not None:
+        from scripts import recovery_quality_commitment_v1 as commitment
+
+        runner = base_run.get("runner")
+        _require(isinstance(runner, Mapping) and isinstance(runner.get("commit"), str), "baseline run lacks StateGuard3R provenance")
+        current_commit = commitment.current_state_guard_commit()
+        _require(runner.get("commit") == current_commit, "baseline run StateGuard3R revision differs from evaluator")
+        checkpoint = base_run.get("checkpoint")
+        checkpoint_sha256 = base_run.get("checkpoint_sha256")
+        _require(isinstance(checkpoint, str) and isinstance(checkpoint_sha256, str), "baseline run lacks checkpoint provenance")
+        authorization = commitment.authorize(
+            recovery_quality_commitment,
+            input_manifest=manifest,
+            forward="baseline",
+            state_guard_commit=current_commit,
+            recal3r_commit=str(base_run.get("baseline_commit")),
+            checkpoint=Path(checkpoint),
+            checkpoint_sha256=checkpoint_sha256,
+            runner_contract={name: base_run.get(name) for name in ("device", "size", "seed", "beta_base", "health_profile")},
+        )
+        _require(commitment.matches_authorization(base_run.get("recovery_quality_commitment"), authorization, forward="baseline"), "baseline run is not bound to this recovery-quality commitment")
+        _require(commitment.matches_authorization(always_run.get("recovery_quality_commitment"), authorization, forward="always-commit"), "always-commit run is not bound to this recovery-quality commitment")
+        _require(commitment.matches_authorization(policy_run.get("recovery_quality_commitment"), authorization, forward="detector-policy"), "detector-policy run is not bound to this recovery-quality commitment")
+        recovery_trial = commitment.trial_binding(authorization)
     equivalence: dict[str, bool] = {}
     for name in EQUIVALENCE_FILES:
         left = _regular(baseline / name, label=f"baseline {name}", mode=0o444)
@@ -181,6 +213,7 @@ def evaluate(input_manifest: Path, baseline_dir: Path, always_commit_dir: Path, 
         payload = {
             "schema_version": SCHEMA_VERSION,
             "input_manifest": _artifact(manifest),
+            "recovery_quality_commitment": recovery_trial,
             "runs": {"baseline": _artifact(baseline / "run.json"), "always_commit": _artifact(always / "run.json"), "detector_policy": _artifact(policy / "run.json")},
             "baseline_always_commit_byte_equivalence": equivalence,
             "metrics": {"baseline": base_metrics.to_dict(), "always_commit": always_metrics.to_dict(), "detector_policy": policy_metrics.to_dict()},
@@ -207,9 +240,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--baseline-dir", required=True, type=Path)
     parser.add_argument("--always-commit-dir", required=True, type=Path)
     parser.add_argument("--policy-dir", required=True, type=Path)
+    parser.add_argument("--recovery-quality-commitment", type=Path)
     parser.add_argument("output_dir", type=Path)
     args = parser.parse_args(argv)
-    output = evaluate(args.input_manifest, args.baseline_dir, args.always_commit_dir, args.policy_dir, args.output_dir)
+    output = evaluate(args.input_manifest, args.baseline_dir, args.always_commit_dir, args.policy_dir, args.output_dir, args.recovery_quality_commitment)
     print(json.dumps({"output_dir": str(output)}, ensure_ascii=False))
     return 0
 

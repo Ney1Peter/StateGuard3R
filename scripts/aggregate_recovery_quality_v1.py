@@ -80,7 +80,13 @@ def _finite(value: object, *, label: str) -> float:
     return number
 
 
-def _read_evaluation(path: Path, *, scene: str, condition: str) -> dict[str, Any]:
+def _read_evaluation(
+    path: Path,
+    *,
+    scene: str,
+    condition: str,
+    recovery_quality_commitment: Path | None,
+) -> dict[str, Any]:
     root = _directory(path, label=f"{scene}/{condition} evaluation")
     evaluation_path = _regular(root / "evaluation.json", label=f"{scene}/{condition} evaluation JSON")
     payload = _json(evaluation_path, label=f"{scene}/{condition} evaluation JSON")
@@ -94,10 +100,39 @@ def _read_evaluation(path: Path, *, scene: str, condition: str) -> dict[str, Any
     ate_effect = _finite(effects.get("ATE_RMSE_effect"), label=f"{scene}/{condition} ATE effect")
     rpe_effect = _finite(effects.get("RPE_translation_RMSE_effect"), label=f"{scene}/{condition} RPE effect")
     baseline_run = _regular(Path(str(runs.get("baseline", {}).get("path"))), label=f"{scene}/{condition} baseline run")
+    always_run = _regular(Path(str(runs.get("always_commit", {}).get("path"))), label=f"{scene}/{condition} always-commit run") if recovery_quality_commitment is not None else None
     policy_run = _regular(Path(str(runs.get("detector_policy", {}).get("path"))), label=f"{scene}/{condition} policy run")
     _require(runs["baseline"].get("sha256") == _sha256(baseline_run) and runs["detector_policy"].get("sha256") == _sha256(policy_run), f"{scene}/{condition} run artifact hash differs")
     baseline_metadata = _json(baseline_run, label=f"{scene}/{condition} baseline run")
+    always_metadata = _json(always_run, label=f"{scene}/{condition} always-commit run") if always_run is not None else None
     policy_metadata = _json(policy_run, label=f"{scene}/{condition} policy run")
+    if recovery_quality_commitment is not None:
+        from scripts import recovery_quality_commitment_v1 as commitment
+
+        input_artifact = payload.get("input_manifest")
+        _require(isinstance(input_artifact, Mapping) and isinstance(input_artifact.get("path"), str), f"{scene}/{condition} evaluation lacks input artifact")
+        runner = baseline_metadata.get("runner")
+        _require(isinstance(runner, Mapping) and isinstance(runner.get("commit"), str), f"{scene}/{condition} baseline lacks StateGuard3R provenance")
+        current_commit = commitment.current_state_guard_commit()
+        _require(runner.get("commit") == current_commit, f"{scene}/{condition} baseline revision differs from aggregation")
+        checkpoint = baseline_metadata.get("checkpoint")
+        checkpoint_sha256 = baseline_metadata.get("checkpoint_sha256")
+        _require(isinstance(checkpoint, str) and isinstance(checkpoint_sha256, str), f"{scene}/{condition} baseline lacks checkpoint provenance")
+        authorization = commitment.authorize(
+            recovery_quality_commitment,
+            input_manifest=Path(input_artifact["path"]),
+            forward="baseline",
+            state_guard_commit=current_commit,
+            recal3r_commit=str(baseline_metadata.get("baseline_commit")),
+            checkpoint=Path(checkpoint),
+            checkpoint_sha256=checkpoint_sha256,
+            runner_contract={name: baseline_metadata.get(name) for name in ("device", "size", "seed", "beta_base", "health_profile")},
+        )
+        _require(authorization["scene"] == scene and authorization["condition"] == condition, f"{scene}/{condition} evaluation maps to a different committed input")
+        _require(commitment.matches_trial_binding(payload.get("recovery_quality_commitment"), authorization), f"{scene}/{condition} evaluation is not bound to this recovery-quality commitment")
+        _require(commitment.matches_authorization(baseline_metadata.get("recovery_quality_commitment"), authorization, forward="baseline"), f"{scene}/{condition} baseline is not bound to this recovery-quality commitment")
+        _require(isinstance(always_metadata, Mapping) and commitment.matches_authorization(always_metadata.get("recovery_quality_commitment"), authorization, forward="always-commit"), f"{scene}/{condition} always-commit is not bound to this recovery-quality commitment")
+        _require(commitment.matches_authorization(policy_metadata.get("recovery_quality_commitment"), authorization, forward="detector-policy"), f"{scene}/{condition} policy is not bound to this recovery-quality commitment")
     baseline_runtime = _finite(baseline_metadata.get("runtime_seconds"), label=f"{scene}/{condition} baseline runtime")
     policy_runtime = _finite(policy_metadata.get("runtime_seconds"), label=f"{scene}/{condition} policy runtime")
     state = policy_metadata.get("state_policy")
@@ -132,14 +167,18 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def aggregate(evaluation_dirs: Mapping[tuple[str, str], Path], output_dir: Path) -> Path:
+def aggregate(
+    evaluation_dirs: Mapping[tuple[str, str], Path],
+    recovery_quality_commitment: Path | None,
+    output_dir: Path,
+) -> Path:
     """Publish a single attempt seal and `GO`/`NO_GO` decision for exactly 8 inputs."""
 
     expected = {(scene, condition) for scene in SCENES for condition in CONDITIONS}
     _require(set(evaluation_dirs) == expected, "formal aggregation requires exactly two scenes times four conditions")
     output = output_dir.resolve(strict=False)
     _require(output.parent == OUTPUT_ROOT and not output.exists(), "aggregation output must be a new direct child of outputs")
-    rows = [_read_evaluation(evaluation_dirs[(scene, condition)], scene=scene, condition=condition) for scene in SCENES for condition in CONDITIONS]
+    rows = [_read_evaluation(evaluation_dirs[(scene, condition)], scene=scene, condition=condition, recovery_quality_commitment=recovery_quality_commitment) for scene in SCENES for condition in CONDITIONS]
     event_rows = [row for row in rows if row["condition"] in EVENT_CONDITIONS]
     clean_rows = [row for row in rows if row["condition"] == "clean"]
     _require(len(event_rows) == 6 and len(clean_rows) == 2, "formal event/clean inventory differs")
@@ -172,7 +211,7 @@ def aggregate(evaluation_dirs: Mapping[tuple[str, str], Path], output_dir: Path)
     }
     decision = "RECOVERY_QUALITY_GO" if all(gates.values()) else "RECOVERY_QUALITY_NO_GO"
     output.mkdir()
-    result = {"schema_version": SCHEMA_VERSION, "decision": decision, "gates": gates, "summary": {"event_trial_count": 6, "ATE_median_effect": ate_median, "ATE_bootstrap_lower_95": ate_lower, "ATE_positive_trial_count": ate_positive, "translation_RPE_median_effect": rpe_median, "translation_RPE_bootstrap_lower_95": rpe_lower, "policy_to_baseline_runtime_median_ratio": runtime_median}, "evaluations": rows, "attempt_seal": "this directory is the sole aggregation attempt for its frozen run inventory"}
+    result = {"schema_version": SCHEMA_VERSION, "decision": decision, "recovery_quality_commitment": str(recovery_quality_commitment.resolve(strict=True)) if recovery_quality_commitment is not None else None, "gates": gates, "summary": {"event_trial_count": 6, "ATE_median_effect": ate_median, "ATE_bootstrap_lower_95": ate_lower, "ATE_positive_trial_count": ate_positive, "translation_RPE_median_effect": rpe_median, "translation_RPE_bootstrap_lower_95": rpe_lower, "policy_to_baseline_runtime_median_ratio": runtime_median}, "evaluations": rows, "attempt_seal": "this directory is the sole aggregation attempt for its frozen run inventory"}
     _write_json(output / "result.json", result)
     _write_json(output / "attempt-seal.json", {"schema_version": SCHEMA_VERSION, "result_sha256": _sha256(output / "result.json"), "sealed": True})
     for path in output.iterdir():
@@ -191,6 +230,7 @@ def _parse_evaluation(value: str) -> tuple[tuple[str, str], Path]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evaluation", action="append", required=True, type=_parse_evaluation)
+    parser.add_argument("--recovery-quality-commitment", required=True, type=Path)
     parser.add_argument("output_dir", type=Path)
     args = parser.parse_args(argv)
     values: dict[tuple[str, str], Path] = {}
@@ -198,7 +238,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if key in values:
             parser.error(f"duplicate evaluation {key}")
         values[key] = path
-    output = aggregate(values, args.output_dir)
+    output = aggregate(values, args.recovery_quality_commitment, args.output_dir)
     print(json.dumps({"output_dir": str(output)}, ensure_ascii=False))
     return 0
 

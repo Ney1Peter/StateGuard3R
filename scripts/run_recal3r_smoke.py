@@ -102,6 +102,11 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="raw dataset root that contains --rgb-timestamp-listing entries for v3",
     )
+    parser.add_argument(
+        "--recovery-quality-commitment",
+        type=Path,
+        help="frozen recovery-quality v1 commitment required for a formal forward",
+    )
     return parser
 
 
@@ -244,6 +249,7 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     health_profile = getattr(args, "health_profile", "v1")
     raw_timestamp_listing = getattr(args, "rgb_timestamp_listing", None)
     raw_timestamp_root = getattr(args, "timestamp_dataset_root", None)
+    raw_recovery_commitment = getattr(args, "recovery_quality_commitment", None)
     if health_profile not in {"v1", "v2", "v3"}:
         parser.error(f"unsupported health profile {health_profile!r}")
     if health_profile == "v3":
@@ -265,6 +271,11 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         if raw_timestamp_root is not None
         else None
     )
+    recovery_quality_commitment = (
+        Path(raw_recovery_commitment).resolve(strict=False)
+        if raw_recovery_commitment is not None
+        else None
+    )
 
     writable_paths = [
         ("baseline root", baseline_root),
@@ -277,6 +288,8 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
         read_only_paths.append(("RGB timestamp listing", timestamp_listing))
     if timestamp_dataset_root is not None:
         read_only_paths.append(("timestamp dataset root", timestamp_dataset_root))
+    if recovery_quality_commitment is not None:
+        read_only_paths.append(("recovery-quality commitment", recovery_quality_commitment))
     read_only_paths.extend(("input image", path) for path in images)
     for label, path in writable_paths:
         if not _inside_project(path):
@@ -427,6 +440,7 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     args.rgb_timestamp_listing_sha256 = (
         _sha256(timestamp_listing) if timestamp_listing is not None else None
     )
+    args.recovery_quality_commitment = recovery_quality_commitment
 
 
 def _prepare_views(image_paths: Sequence[Path], size: int, torch: Any) -> list[dict[str, Any]]:
@@ -493,6 +507,43 @@ def _health_profile(args: argparse.Namespace) -> str:
     if profile not in {"v1", "v2", "v3"}:
         raise RuntimeError(f"unsupported health profile {profile!r}")
     return profile
+
+
+def _authorize_recovery_quality_commitment(
+    args: argparse.Namespace,
+    *,
+    runner_provenance: Mapping[str, Any],
+    forward: str,
+    health_profile: str,
+) -> dict[str, Any] | None:
+    """Authorize a formal forward before any model state or CUDA work begins."""
+
+    commitment_path = getattr(args, "recovery_quality_commitment", None)
+    if commitment_path is None:
+        return None
+    if args.input_manifest is None:
+        raise RuntimeError("recovery-quality commitment requires --input-manifest")
+    repository_root = Path(__file__).resolve().parents[1]
+    if str(repository_root) not in sys.path:
+        sys.path.insert(0, str(repository_root))
+    from scripts import recovery_quality_commitment_v1 as commitment
+
+    return commitment.authorize(
+        commitment_path,
+        input_manifest=args.input_manifest,
+        forward=forward,
+        state_guard_commit=str(runner_provenance["commit"]),
+        recal3r_commit=args.baseline_commit,
+        checkpoint=args.checkpoint,
+        checkpoint_sha256=args.checkpoint_sha256,
+        runner_contract={
+            "device": args.device,
+            "size": args.size,
+            "seed": args.seed,
+            "beta_base": args.beta_base,
+            "health_profile": health_profile,
+        },
+    )
 
 
 def _model_ready_rgb_sha256(image: Any) -> str:
@@ -1080,6 +1131,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     _validate_args(args, parser)
     health_profile = _health_profile(args)
     runner_provenance = _runner_provenance(args.baseline_root)
+    recovery_quality_binding = _authorize_recovery_quality_commitment(
+        args,
+        runner_provenance=runner_provenance,
+        forward="baseline",
+        health_profile=health_profile,
+    )
     run_started_at = datetime.now().astimezone().isoformat()
 
     state_src = Path(__file__).resolve().parents[1] / "src"
@@ -1334,6 +1391,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "checkpoint_size_bytes": args.checkpoint_size_bytes,
         "input_mode": "manifest" if args.input_manifest is not None else "images",
         "input_manifest": _input_manifest_metadata(args),
+        "recovery_quality_commitment": recovery_quality_binding,
         "images": [
             {"path": frame["path"], "sha256": frame["sha256"]}
             for frame in input_frames

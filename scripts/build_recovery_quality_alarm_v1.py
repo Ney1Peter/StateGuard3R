@@ -130,6 +130,7 @@ def build(
     rgb_listing: Path,
     dataset_root: Path,
     output_dir: Path,
+    recovery_quality_commitment: Path | None = None,
 ) -> Path:
     """Publish a v3 hybrid alarm artifact from one frozen baseline health ledger."""
 
@@ -152,6 +153,29 @@ def build(
     _require(run.get("health_profile") == "v2", "quality shadow baseline must use health-profile v2")
     _require(isinstance(run.get("input_manifest"), Mapping), "baseline run lacks input binding")
     _require(run["input_manifest"].get("path") == str(manifest_path) and run["input_manifest"].get("sha256") == _sha256(manifest_path), "baseline run is not bound to this input manifest")
+    recovery_binding: dict[str, Any] | None = None
+    if recovery_quality_commitment is not None:
+        from scripts import recovery_quality_commitment_v1 as commitment
+
+        runner = run.get("runner")
+        _require(isinstance(runner, Mapping) and isinstance(runner.get("commit"), str), "baseline run lacks StateGuard3R provenance")
+        current_commit = commitment.current_state_guard_commit()
+        _require(runner.get("commit") == current_commit, "baseline run StateGuard3R revision differs from alarm builder")
+        checkpoint = run.get("checkpoint")
+        checkpoint_sha256 = run.get("checkpoint_sha256")
+        _require(isinstance(checkpoint, str) and isinstance(checkpoint_sha256, str), "baseline run lacks checkpoint provenance")
+        recovery_binding = commitment.authorize(
+            recovery_quality_commitment,
+            input_manifest=manifest_path,
+            forward="baseline",
+            state_guard_commit=current_commit,
+            recal3r_commit=str(run.get("baseline_commit")),
+            checkpoint=Path(checkpoint),
+            checkpoint_sha256=checkpoint_sha256,
+            runner_contract={name: run.get(name) for name in ("device", "size", "seed", "beta_base", "health_profile")},
+        )
+        _require(commitment.matches_authorization(run.get("recovery_quality_commitment"), recovery_binding, forward="baseline"), "baseline run is not bound to this recovery-quality commitment")
+        _require(commitment.detector_config_artifact(recovery_quality_commitment) == commitment.artifact(config_path), "alarm builder formal config is not committed")
     config = _strict_json(config_path, label="frozen v3 formal config")
     continuous = config.get("continuous_scoring")
     thresholds = config.get("thresholds")
@@ -181,6 +205,9 @@ def build(
         payload = {
             "schema_version": SCHEMA_VERSION,
             "input_manifest": _artifact(manifest_path),
+            "recovery_quality_commitment": (
+                commitment.trial_binding(recovery_binding) if recovery_binding is not None else None
+            ),
             "baseline": {"run": _artifact(run_path), "health": _artifact(health_path)},
             "formal_v3_config": _artifact(config_path),
             "online_input_policy": {
@@ -222,9 +249,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--formal-config", required=True, type=Path)
     parser.add_argument("--rgb-listing", required=True, type=Path)
     parser.add_argument("--dataset-root", required=True, type=Path)
+    parser.add_argument("--recovery-quality-commitment", type=Path)
     parser.add_argument("output_dir", type=Path)
     args = parser.parse_args(argv)
-    output = build(args.input_manifest, args.baseline_dir, args.formal_config, args.rgb_listing, args.dataset_root, args.output_dir)
+    output = build(args.input_manifest, args.baseline_dir, args.formal_config, args.rgb_listing, args.dataset_root, args.output_dir, args.recovery_quality_commitment)
     print(json.dumps({"output_dir": str(output)}, ensure_ascii=False))
     return 0
 

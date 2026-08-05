@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 from typing import Any, Mapping
 
 
@@ -14,6 +15,7 @@ SCHEMA_VERSION = "stateguard3r.recovery-quality-v1-commitment.v1"
 SCENES = ("rgbd_dataset_freiburg3_walking_static", "rgbd_dataset_freiburg3_walking_xyz")
 CONDITIONS = ("clean", "dynamic", "wrong-order", "low-overlap")
 FORWARDS = ("baseline", "always-commit", "detector-policy")
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class RecoveryQualityCommitmentError(ValueError):
@@ -107,6 +109,13 @@ def _commitment(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     _require(payload.get("status") == "COMMITTED_PRE_FORMAL_FORWARD", "commitment is not pre-forward frozen")
     _require(payload.get("no_reconfiguration_after_commitment") is True, "commitment does not prohibit reconfiguration")
     return payload, artifact(commitment_path)
+
+
+def detector_config_artifact(commitment_path: Path) -> dict[str, Any]:
+    """Return the frozen Detector-v3 config artifact named by a commitment."""
+
+    payload, _ = _commitment(commitment_path)
+    return _validate_artifact(payload.get("frozen_detector_v3_config"), label="commitment detector config", mode=0o444)
 
 
 def _expected_runs(payload: Mapping[str, Any]) -> dict[tuple[str, str], Mapping[str, Any]]:
@@ -210,3 +219,46 @@ def same_binding(left: object, right: object) -> bool:
     """Compare serialized formal bindings without accepting missing fields."""
 
     return isinstance(left, Mapping) and isinstance(right, Mapping) and dict(left) == dict(right)
+
+
+def current_state_guard_commit() -> str:
+    """Return the clean tracked revision that is allowed to consume a commitment."""
+
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=no"],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout
+        commit = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RecoveryQualityCommitmentError(f"cannot inspect StateGuard3R commitment consumer: {error}") from error
+    _require(status == "", "StateGuard3R tracked worktree is not clean for commitment consumption")
+    return commit
+
+
+def trial_binding(authorization: Mapping[str, Any]) -> dict[str, Any]:
+    """Drop the per-forward label when one triple is handed to the evaluator."""
+
+    return {
+        name: authorization[name]
+        for name in ("commitment", "run_id", "scene", "condition", "input_manifest")
+    }
+
+
+def matches_authorization(value: object, authorization: Mapping[str, Any], *, forward: str) -> bool:
+    expected = dict(authorization)
+    expected["forward"] = forward
+    return same_binding(value, expected)
+
+
+def matches_trial_binding(value: object, authorization: Mapping[str, Any]) -> bool:
+    return same_binding(value, trial_binding(authorization))

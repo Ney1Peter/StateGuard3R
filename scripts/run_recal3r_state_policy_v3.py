@@ -105,6 +105,9 @@ def _validate_policy_args(args: argparse.Namespace, parser: argparse.ArgumentPar
         parser.error("--max-hold must be in [1, 3]")
     detector_paths = (args.detector_run_json, args.detector_alarm_timeline)
     quality_artifact = args.quality_alarm_artifact
+    recovery_commitment = getattr(args, "recovery_quality_commitment", None)
+    if recovery_commitment is not None and args.state_policy not in {"always-commit", "detector-v3-quality-prior-alarm"}:
+        parser.error("--recovery-quality-commitment is valid only with always-commit or detector-v3-quality-prior-alarm")
     if args.state_policy == "always-commit":
         if args.alarm_frame:
             parser.error("--alarm-frame is valid only with an alarm-driven policy")
@@ -249,6 +252,12 @@ def _quality_v1_alarms(args: argparse.Namespace) -> tuple[list[bool], dict[str, 
     positions = [index for index, value in enumerate(alarms) if value]
     if payload.get("policy_alarm_positions") != positions or payload.get("policy_filter") != "causal_hybrid_alarm_rising_edge":
         raise RuntimeError("quality detector artifact rising-edge policy binding differs")
+    recovery_binding = getattr(args, "recovery_quality_binding", None)
+    if recovery_binding is not None:
+        from scripts import recovery_quality_commitment_v1 as commitment
+
+        if not commitment.matches_trial_binding(payload.get("recovery_quality_commitment"), recovery_binding):
+            raise RuntimeError("quality detector alarm artifact is not bound to this recovery-quality commitment")
     return alarms, {
         "kind": "recovery_quality_v1_shadow_detector_alarm",
         "artifact": artifact,
@@ -279,6 +288,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     _validate_policy_args(args, parser)
     smoke._validate_args(args, parser)
     runner_provenance = _self_provenance()
+    forward = (
+        "always-commit"
+        if args.state_policy == "always-commit"
+        else "detector-policy"
+        if args.state_policy == "detector-v3-quality-prior-alarm"
+        else None
+    )
+    recovery_quality_binding = (
+        smoke._authorize_recovery_quality_commitment(
+            args,
+            runner_provenance=runner_provenance,
+            forward=forward,
+            health_profile="v2",
+        )
+        if forward is not None
+        else None
+    )
+    args.recovery_quality_binding = recovery_quality_binding
     run_started_at = datetime.now().astimezone().isoformat()
 
     state_src = Path(__file__).resolve().parents[1] / "src"
@@ -497,6 +524,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "checkpoint_sha256": args.checkpoint_sha256,
         "checkpoint_size_bytes": args.checkpoint_size_bytes,
         "input_manifest": smoke._input_manifest_metadata(args),
+        "recovery_quality_commitment": recovery_quality_binding,
         "images": [{"path": frame["path"], "sha256": frame["sha256"]} for frame in input_frames],
         "input_frames": input_frames,
         "frame_count": len(views),
