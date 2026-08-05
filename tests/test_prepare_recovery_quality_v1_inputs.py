@@ -53,6 +53,12 @@ def test_prepare_builds_four_replayable_conditions_without_cuda(tmp_path: Path, 
     registry = json.loads((output / "recovery-quality-inputs.json").read_text())
     assert registry["status"] == "pre_forward_recovery_quality_inputs"
     assert [row["condition"] for row in registry["runs"]] == ["clean", "dynamic", "wrong-order", "low-overlap"]
+    for row in registry["runs"]:
+        for artifact_name in ("source_manifest", "input_manifest"):
+            artifact = row[artifact_name]
+            artifact_path = Path(artifact["path"])
+            assert artifact_path.exists()
+            assert output in artifact_path.parents
     clean = load_input_manifest(output / "clean" / "input-manifest.json")
     wrong = load_input_manifest(output / "wrong-order" / "input-manifest.json")
     assert len(clean.frames) == len(wrong.frames) == 30
