@@ -92,3 +92,15 @@ def test_alarm_builder_rejects_gt_key_in_health(tmp_path: Path, monkeypatch: pyt
     _formal_config(config)
     with pytest.raises(alarm.RecoveryQualityAlarmError, match="forbidden"):
         alarm.build(manifest, baseline, config, raw / "rgb.txt", raw, output_root / "alarms-0001")
+
+
+def test_alarm_cli_passes_positional_output_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: list[Path] = []
+
+    def fake(*args: Path) -> Path:
+        captured.extend(args)
+        return args[-1]
+
+    monkeypatch.setattr(alarm, "build", fake)
+    assert alarm.main(["--input-manifest", "a", "--baseline-dir", "b", "--formal-config", "c", "--rgb-listing", "d", "--dataset-root", "e", str(tmp_path / "out")]) == 0
+    assert captured[-1] == tmp_path / "out"

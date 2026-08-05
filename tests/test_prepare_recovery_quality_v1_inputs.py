@@ -75,3 +75,16 @@ def test_prepare_requires_cuda_disabled_and_readonly_raw(tmp_path: Path, monkeyp
     os.chmod(raw / "rgb.txt", 0o644)
     with pytest.raises(prepare.RecoveryQualityInputError, match="0444"):
         prepare.prepare(raw, output_root / "quality-inputs-0002", dataset_id=raw.name)
+
+
+def test_prepare_cli_passes_positional_output_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake(dataset_root: Path, output_dir: Path, *, dataset_id: str) -> Path:
+        captured.update(dataset_root=dataset_root, output_dir=output_dir, dataset_id=dataset_id)
+        return output_dir
+
+    monkeypatch.setattr(prepare, "prepare", fake)
+    assert prepare.main(["--dataset-root", "raw", "--dataset-id", "scene", str(tmp_path / "out")]) == 0
+    assert captured["dataset_id"] == "scene"
+    assert captured["output_dir"] == tmp_path / "out"

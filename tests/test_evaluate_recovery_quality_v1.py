@@ -87,3 +87,15 @@ def test_evaluator_rejects_non_equivalent_control(tmp_path: Path, monkeypatch: p
     (always / "health.jsonl").chmod(0o444)
     with pytest.raises(evaluate.RecoveryQualityEvaluationError, match="byte-equivalent"):
         evaluate.evaluate(manifest, baseline, always, policy, output_root / "evaluation-0001")
+
+
+def test_evaluator_cli_passes_positional_output_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: list[Path] = []
+
+    def fake(*args: Path) -> Path:
+        captured.extend(args)
+        return args[-1]
+
+    monkeypatch.setattr(evaluate, "evaluate", fake)
+    assert evaluate.main(["--input-manifest", "a", "--baseline-dir", "b", "--always-commit-dir", "c", "--policy-dir", "d", str(tmp_path / "out")]) == 0
+    assert captured[-1] == tmp_path / "out"
