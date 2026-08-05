@@ -157,7 +157,10 @@ def _nearest_unique(timestamp: Decimal, rows: Sequence[TUMRow], *, label: str) -
         return None
     distance = min(item[0] for item in candidates)
     closest = [row for candidate_distance, row in candidates if candidate_distance == distance]
-    _require(len(closest) == 1, f"{label} has a nearest-timestamp tie")
+    # A non-unique nearest raw association invalidates this RGB row, not every
+    # otherwise-valid block in the immutable sequence.
+    if len(closest) != 1:
+        return None
     return closest[0]
 
 
@@ -382,6 +385,12 @@ def prepare(dataset_root: Path, output_dir: Path, *, dataset_id: str) -> Path:
             "dataset": dataset_id,
             "dataset_root": str(raw_root),
             "archive": _artifact(archive),
+            "association_policy": {
+                "method": "unique_nearest_absolute_timestamp",
+                "max_delta_seconds": str(MAX_ASSOCIATION_DELTA),
+                "tie_policy": "reject_as_unusable_row",
+                "rejected_rgb_rows": [index for index, frame in enumerate(frames) if frame is None],
+            },
             "frame_count": FRAME_COUNT,
             "event_start": EVENT_START,
             "seed": SEED,
