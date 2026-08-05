@@ -31,6 +31,13 @@ correspondence 与 `rgb.txt` capture timestamps；拒绝 GT/depth/label/event/so
 字段。policy 对 candidate frame `t` 只读 alarm `t-1`，并使用固定 rising-edge transform 与
 `max_hold=3`。每条成功 output 都在继续前冻结为 directories `0555`、files `0444`。
 
+在任何正式 forward 之前，commitment 必须冻结全部两场景、八个 manifest、代码 revision、
+checkpoint、Detector-v3 config、runner contract 与三类 forward。后续 baseline、alarm builder、
+always-commit、detector-policy、evaluator 与 aggregate 都必须显式接收同一个
+`--recovery-quality-commitment`；每一层拒绝未承诺的 manifest、代码/检查点/配置漂移或
+scene/condition substitution，并将该绑定写入自己的只读 artifact。aggregate 的唯一 attempt seal
+仅接受八个与 commitment 一一对应的 evaluation。
+
 总计 8 个 inputs、24 个 GPU forwards。每一条 run 使用相同的 pinned checkpoint SHA-256、seed
 0、size 512、`beta_base=0.1`、batch 1 与单张启动时可用显存至少 12 GiB 的 GPU；不停止或清理
 他人进程。

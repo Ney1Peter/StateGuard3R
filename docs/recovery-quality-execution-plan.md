@@ -154,6 +154,7 @@ frame/GT 绑定、prefix-only 行为、错误四元数/退化/缺帧拒绝和 no
    全部 8 个 input manifests；原子发布且冻结。
 3. 将 protocol、code commit、raw/archive hashes、input manifests、calibration manifest、
    checkpoint hash、GPU rule、metric gate 和精确 run inventory 绑定成 quality commitment。
+   所有后续 formal 工具都必须消费该 commitment；不存在仅在最终文档手写 SHA 的替代路径。
 
 **Gate B PASS：** 两 scene 原始数据与所有 manifests/validators PASS、只读；commitment 已冻结。
 
@@ -177,6 +178,11 @@ frame/GT 绑定、prefix-only 行为、错误四元数/退化/缺帧拒绝和 no
 
 ## 5. 当前执行指针
 
-当前处于 **Gate A / step 1**：只读审计已确认 project disk 仍有约 146 GiB 可用，GPU 0/2/3 各有
-超过 12 GiB 空闲；`fr1_desk`/`fr2_desk` 为已解盲 fixtures，`fr3_walking_static` 已冻结且其
-acquisition audit 明确记录没有 ReCal3R response。尚未读取或产生本计划 scene A/B 的模型 response。
+当前处于 **Gate B / formal input re-freeze**：scene B 的唯一允许 archive acquisition 已 PASS，
+archive/raw tree 已冻结；`fr3_walking_static` 也保持只读且没有 ReCal3R response。一次 pre-commit
+scene A builder 尝试发现官方 static GT 的重复最近邻行，现已以既有 formal-v2 一致的
+“拒绝该 RGB 行、从有效 block 决定性选择”语义修复并审计。较早生成的 scene B input candidate
+不会覆盖或作为本轮 commitment 输入；两个场景将用同一最新提交重新生成新编号、独立验证后才
+commit。另已补齐 commitment 被 runner/alarm/evaluator/aggregate 强制消费的验证链。
+
+尚未读取或产生本计划 scene A/B 的模型 response。
