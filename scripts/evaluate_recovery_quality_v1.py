@@ -207,7 +207,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--baseline-dir", required=True, type=Path)
     parser.add_argument("--always-commit-dir", required=True, type=Path)
     parser.add_argument("--policy-dir", required=True, type=Path)
-    parser.add_argument("output-dir", type=Path)
+    parser.add_argument("output_dir", type=Path)
     args = parser.parse_args(argv)
     output = evaluate(args.input_manifest, args.baseline_dir, args.always_commit_dir, args.policy_dir, args.output_dir)
     print(json.dumps({"output_dir": str(output)}, ensure_ascii=False))

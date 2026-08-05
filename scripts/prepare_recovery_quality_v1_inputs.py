@@ -389,7 +389,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", required=True, type=Path)
     parser.add_argument("--dataset-id", required=True)
-    parser.add_argument("output-dir", type=Path)
+    parser.add_argument("output_dir", type=Path)
     args = parser.parse_args(argv)
     result = prepare(args.dataset_root, args.output_dir, dataset_id=args.dataset_id)
     print(json.dumps({"output_dir": str(result)}, ensure_ascii=False))

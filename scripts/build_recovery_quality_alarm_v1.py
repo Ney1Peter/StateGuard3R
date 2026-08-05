@@ -222,7 +222,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--formal-config", required=True, type=Path)
     parser.add_argument("--rgb-listing", required=True, type=Path)
     parser.add_argument("--dataset-root", required=True, type=Path)
-    parser.add_argument("output-dir", type=Path)
+    parser.add_argument("output_dir", type=Path)
     args = parser.parse_args(argv)
     output = build(args.input_manifest, args.baseline_dir, args.formal_config, args.rgb_listing, args.dataset_root, args.output_dir)
     print(json.dumps({"output_dir": str(output)}, ensure_ascii=False))
