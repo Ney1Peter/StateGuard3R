@@ -12,6 +12,7 @@ import pytest
 
 import scripts.run_recal3r_smoke as smoke_script
 from scripts.run_recal3r_smoke import (
+    _freeze_output_tree,
     PINNED_RECAL3R_COMMIT,
     _assert_module_source,
     _binary_module_provenance,
@@ -173,6 +174,21 @@ def test_atomic_metadata_writer_emits_strict_json(tmp_path: Path) -> None:
         "value": 1.25,
     }
     assert list(output.parent.glob(".run.json.*.tmp")) == []
+
+
+def test_success_output_freeze_seals_only_regular_files(tmp_path: Path) -> None:
+    output = tmp_path / "run"
+    nested = output / "nested"
+    nested.mkdir(parents=True)
+    (output / "run.json").write_text("{}\n", encoding="utf-8")
+    (nested / "health.jsonl").write_text("{}\n", encoding="utf-8")
+
+    _freeze_output_tree(output)
+
+    assert (output.stat().st_mode & 0o777) == 0o555
+    assert (nested.stat().st_mode & 0o777) == 0o555
+    assert ((output / "run.json").stat().st_mode & 0o777) == 0o444
+    assert ((nested / "health.jsonl").stat().st_mode & 0o777) == 0o444
 
 
 def _corruption_manifest(tmp_path: Path) -> tuple[Path, list[Path]]:
