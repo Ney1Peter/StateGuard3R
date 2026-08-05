@@ -41,7 +41,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.set_defaults(health_profile="v2")
     parser.add_argument(
         "--state-policy",
-        choices=("always-commit", "forced-prior-alarm", "detector-v3-prior-alarm"),
+        choices=(
+            "always-commit",
+            "forced-prior-alarm",
+            "detector-v3-prior-alarm",
+            "detector-v3-quality-prior-alarm",
+        ),
         required=True,
         help="always-commit is the equivalence control; detector-v3-prior-alarm consumes frozen v3 alarms",
     )
@@ -62,6 +67,11 @@ def _parser() -> argparse.ArgumentParser:
         "--detector-alarm-timeline",
         type=Path,
         help="frozen formal-v3 evaluation timeline; only its hybrid_alarm field is consumed",
+    )
+    parser.add_argument(
+        "--quality-alarm-artifact",
+        type=Path,
+        help="frozen recovery-quality v1 shadow alarm artifact",
     )
     return parser
 
@@ -94,23 +104,31 @@ def _validate_policy_args(args: argparse.Namespace, parser: argparse.ArgumentPar
     if args.max_hold < 1 or args.max_hold > 3:
         parser.error("--max-hold must be in [1, 3]")
     detector_paths = (args.detector_run_json, args.detector_alarm_timeline)
+    quality_artifact = args.quality_alarm_artifact
     if args.state_policy == "always-commit":
         if args.alarm_frame:
             parser.error("--alarm-frame is valid only with an alarm-driven policy")
-        if any(path is not None for path in detector_paths):
+        if any(path is not None for path in detector_paths) or quality_artifact is not None:
             parser.error("detector source arguments are valid only with --state-policy detector-v3-prior-alarm")
     if args.state_policy == "forced-prior-alarm":
         if not args.alarm_frame:
             parser.error("forced-prior-alarm requires at least one --alarm-frame")
         if any(frame < 0 for frame in args.alarm_frame):
             parser.error("--alarm-frame must be non-negative")
-        if any(path is not None for path in detector_paths):
+        if any(path is not None for path in detector_paths) or quality_artifact is not None:
             parser.error("forced-prior-alarm may not use detector source arguments")
     if args.state_policy == "detector-v3-prior-alarm":
         if args.alarm_frame:
             parser.error("detector-v3-prior-alarm derives alarms from frozen evidence; do not pass --alarm-frame")
         if any(path is None for path in detector_paths):
             parser.error("detector-v3-prior-alarm requires --detector-run-json and --detector-alarm-timeline")
+        if quality_artifact is not None:
+            parser.error("detector-v3-prior-alarm may not use --quality-alarm-artifact")
+    if args.state_policy == "detector-v3-quality-prior-alarm":
+        if args.alarm_frame or any(path is not None for path in detector_paths):
+            parser.error("detector-v3-quality-prior-alarm accepts only --quality-alarm-artifact")
+        if quality_artifact is None:
+            parser.error("detector-v3-quality-prior-alarm requires --quality-alarm-artifact")
 
 
 def _frozen_json(path: Path, *, label: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -195,6 +213,49 @@ def _detector_v3_alarms(args: argparse.Namespace) -> tuple[list[bool], dict[str,
         "policy_alarm_positions": positions,
         "policy_filter": "causal_hybrid_alarm_rising_edge",
         "causality": "policy reads only alarm_t_minus_1; labels and event metadata are not consumed",
+    }
+
+
+def _quality_v1_alarms(args: argparse.Namespace) -> tuple[list[bool], dict[str, Any]]:
+    """Read a frozen shadow-detector artifact without consulting its GT fields.
+
+    The quality alarm builder already rejects GT/depth/labels from the online
+    health interface.  This runner consumes only the input binding and the
+    detector's published attribution booleans, then verifies the fixed rising
+    edge transform independently before it can affect model state.
+    """
+
+    assert args.quality_alarm_artifact is not None
+    payload, artifact = _frozen_json(args.quality_alarm_artifact, label="quality detector alarm artifact")
+    if payload.get("schema_version") != "stateguard3r.recovery-quality-alarm.v1":
+        raise RuntimeError("quality detector alarm artifact has unsupported schema")
+    input_manifest = args.input_manifest.resolve(strict=True)
+    binding = payload.get("input_manifest")
+    if not isinstance(binding, dict) or binding.get("path") != str(input_manifest) or binding.get("sha256") != smoke._sha256(input_manifest):
+        raise RuntimeError("quality detector alarm artifact is not bound to this input manifest")
+    attribution = payload.get("attribution")
+    if not isinstance(attribution, list) or not attribution:
+        raise RuntimeError("quality detector alarm artifact lacks attribution rows")
+    hybrid_alarms: list[bool] = []
+    for frame_id, row in enumerate(attribution):
+        if not isinstance(row, dict) or set(row) != {
+            "frame_id", "continuous_alarm", "timestamp_order_alarm", "hybrid_alarm"
+        }:
+            raise RuntimeError(f"quality detector attribution row {frame_id} schema differs")
+        if row.get("frame_id") != frame_id or not all(isinstance(row.get(name), bool) for name in ("continuous_alarm", "timestamp_order_alarm", "hybrid_alarm")):
+            raise RuntimeError(f"quality detector attribution row {frame_id} is invalid")
+        hybrid_alarms.append(row["hybrid_alarm"])
+    alarms = [value and (index == 0 or not hybrid_alarms[index - 1]) for index, value in enumerate(hybrid_alarms)]
+    positions = [index for index, value in enumerate(alarms) if value]
+    if payload.get("policy_alarm_positions") != positions or payload.get("policy_filter") != "causal_hybrid_alarm_rising_edge":
+        raise RuntimeError("quality detector artifact rising-edge policy binding differs")
+    return alarms, {
+        "kind": "recovery_quality_v1_shadow_detector_alarm",
+        "artifact": artifact,
+        "input_manifest": {"path": str(input_manifest), "sha256": smoke._sha256(input_manifest), "size_bytes": input_manifest.stat().st_size},
+        "policy_alarm_positions": positions,
+        "policy_filter": "causal_hybrid_alarm_rising_edge",
+        "causality": "policy reads only alarm_t_minus_1; GT/depth/labels/event metadata are not consumed",
     }
 
 
@@ -324,6 +385,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         alarms, alarm_source = _detector_v3_alarms(args)
         if len(alarms) != len(views):
             raise RuntimeError("frozen detector alarm count does not equal state-policy input frame count")
+    elif args.state_policy == "detector-v3-quality-prior-alarm":
+        alarms, alarm_source = _quality_v1_alarms(args)
+        if len(alarms) != len(views):
+            raise RuntimeError("quality detector alarm count does not equal state-policy input frame count")
 
     device = torch.device(args.device)
     if device.type == "cuda":
@@ -409,7 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "alarm_semantics": (
             "synthetic feasibility control; frame t alarm can only affect update t+1"
             if alarm_source is None
-            else "frozen formal Detector v3 hybrid alarm; frame t alarm can only affect update t+1"
+            else "frozen Detector v3 hybrid alarm; frame t alarm can only affect update t+1"
         ),
         "alarm_source": alarm_source,
         "source_provenance": result.source_provenance,

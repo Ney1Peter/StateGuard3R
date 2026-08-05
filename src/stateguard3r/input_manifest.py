@@ -29,6 +29,7 @@ INDEX_CONVENTION = "zero_based_inclusive"
 RECTANGLE_COORDINATE_REFERENCE = "model_input_after_resize_and_center_crop"
 FORMAL_SOURCE_SCHEMA_VERSION = "stateguard3r.tum-formal-pilot-source.v1"
 FORMAL_RAW_MANIFEST_SCHEMA_VERSION = "stateguard3r.tum-raw-audit.v1"
+RECOVERY_QUALITY_SOURCE_SCHEMA_VERSION = "stateguard3r.recovery-quality-source.v1"
 
 CORRUPTION_TO_TRANSFORM = {
     "low_overlap_jump": "source_frame_substitution",
@@ -683,10 +684,15 @@ def _corruption_expectations(
     frame_count: int,
     source_frame_count: int,
     donor_pool_start: int | None,
+    allow_empty_clean_control: bool = False,
 ) -> tuple[list[str | None], list[int | None]]:
     raw_corruptions = payload.get("corruptions")
-    if not isinstance(raw_corruptions, list) or not raw_corruptions:
+    if not isinstance(raw_corruptions, list):
         raise InputManifestError("corruptions must be a non-empty JSON array")
+    if not raw_corruptions:
+        if not allow_empty_clean_control or payload.get("recovery_quality_clean_control") is not True:
+            raise InputManifestError("corruptions must be a non-empty JSON array")
+        return [None] * frame_count, [None] * frame_count
     expected: list[str | None] = [None] * frame_count
     expected_replacements: list[int | None] = [None] * frame_count
     for index, raw in enumerate(raw_corruptions):
@@ -1034,6 +1040,9 @@ def load_input_manifest(path: str | os.PathLike[str]) -> InputManifest:
     is_formal_source = (
         source_payload.get("schema_version") == FORMAL_SOURCE_SCHEMA_VERSION
     )
+    is_recovery_quality_source = (
+        source_payload.get("schema_version") == RECOVERY_QUALITY_SOURCE_SCHEMA_VERSION
+    )
     source_frames = _source_frames(
         source_payload,
         base_dir=source_manifest_path.parent,
@@ -1071,6 +1080,7 @@ def load_input_manifest(path: str | os.PathLike[str]) -> InputManifest:
         donor_pool_start=(
             source_output_frame_count if has_declared_source_pool else None
         ),
+        allow_empty_clean_control=is_recovery_quality_source,
     )
 
     frames: list[ManifestFrame] = []
