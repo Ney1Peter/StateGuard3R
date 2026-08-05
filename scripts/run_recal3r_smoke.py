@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import platform
 import random
+import stat
 import subprocess
 import sys
 import tempfile
@@ -210,6 +211,22 @@ def _write_json_atomic(path: Path, payload: Any) -> None:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def _freeze_output_tree(output_dir: Path) -> None:
+    """Seal successful task outputs without touching raw inputs or other repos."""
+
+    for path in sorted(output_dir.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        metadata = os.lstat(path)
+        if stat.S_ISLNK(metadata.st_mode):
+            raise RuntimeError(f"refusing to freeze symlinked output: {path}")
+        if stat.S_ISDIR(metadata.st_mode):
+            path.chmod(0o555)
+        elif stat.S_ISREG(metadata.st_mode):
+            path.chmod(0o444)
+        else:
+            raise RuntimeError(f"refusing to freeze non-regular output: {path}")
+    output_dir.chmod(0o555)
 
 
 def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -1386,6 +1403,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ],
         }
     _write_json_atomic(args.output_dir / "run.json", metadata)
+    _freeze_output_tree(args.output_dir)
     print(json.dumps(metadata, ensure_ascii=False, indent=2, allow_nan=False))
     return 0
 
