@@ -16,7 +16,12 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import sys
 from typing import Any, Iterator, Mapping, Sequence
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts import acquire_tum_v2_holdout as tum
 
