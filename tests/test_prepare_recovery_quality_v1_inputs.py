@@ -101,6 +101,12 @@ def test_prepare_excludes_a_frame_with_a_nonunique_nearest_gt_match(
     output = prepare.prepare(raw, output_root / "quality-inputs-0001", dataset_id=raw.name)
     registry = json.loads((output / "recovery-quality-inputs.json").read_text())
     assert registry["base_start_rgb_row"] <= 50 - 30 or registry["base_start_rgb_row"] > 50
+    assert registry["association_policy"] == {
+        "method": "unique_nearest_absolute_timestamp",
+        "max_delta_seconds": "0.02",
+        "tie_policy": "reject_as_unusable_row",
+        "rejected_rgb_rows": [50],
+    }
 
 
 def test_prepare_cli_passes_positional_output_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
