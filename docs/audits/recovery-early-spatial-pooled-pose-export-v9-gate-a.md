@@ -2,9 +2,15 @@
 
 - Date: 2026-08-07
 - Scope: code/source/causality/CPU gate only. **No v9 CUDA forward was run.**
-- Decision: **PASS — authorize only the one-use v9 dynamic always-commit
-  control named in the v9 execution plan.** This is not a quality result, does
-  not authorize a candidate yet, and does not authorize any v8 activity.
+- Decision: **SUPERSEDED / NOT AUTHORIZING GPU.** The former PASS wording in
+  this document was based on dispatcher revision `872c748`, whose tests did
+  not establish the pre-registered atomic lease, observed pipe-ready
+  handshake, closed-and-drained transcript, PID/start-time proof, recursive
+  immutable modes, or independent one-use validator. It must not be used to
+  start the dynamic control, candidate, wrong/low condition, or any v8
+  activity. A replacement Gate-A audit will cite the corrected launcher
+  revision and a fresh complete CPU evidence set only after all listed tests
+  pass.
 
 ## Mechanism bound before execution
 
@@ -101,10 +107,11 @@ markers, pipe drain, PID/start-time absence proof, output inventory, NUL
 status, and permissions. The validator report is itself one-use and frozen.
 The launcher has no repair, postflight-only, validator-retry, or ID-reuse API.
 
-## Exact next action and stop rules
+## Withdrawn next action and stop rules
 
-The only authorized forward is
-recovery-early-spatial-pooled-pose-v9-dynamic-always-commit-0001.
+There is currently **no authorized v9 forward**. The previously named
+`recovery-early-spatial-pooled-pose-v9-dynamic-always-commit-0001` remains
+unconsumed and may only be considered after a replacement Gate-A PASS.
 
 It must use the single-owner dispatcher, GPU 2 UUID
 GPU-d2be321e-2001-7e74-d0f0-3ee103fcd250, the dynamic development manifest,
