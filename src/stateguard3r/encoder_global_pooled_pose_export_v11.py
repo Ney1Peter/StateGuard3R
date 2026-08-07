@@ -82,6 +82,8 @@ class EncoderGlobalPooledPoseExport:
             "orthonormality_max_abs_error": decoded.orthonormality_max_abs_error,
             "homogeneous_max_abs_error": decoded.homogeneous_max_abs_error,
             "proper_rotation": True,
+            "fallback_used": False,
+            "no_fallback": True,
             "exported_pose_gpu_digest": tensor_gpu_digest(decoded.pose, torch=self._torch),
         }
 

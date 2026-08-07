@@ -153,7 +153,12 @@ def audit_pinned_encoder_global_pose_sources(
     required_global = ("def _get_img_level_feat(self, feat):", "torch.mean(feat, dim=1, keepdim=True)")
     required_lighter = ("global_img_feat_i = self._get_img_level_feat(feat_i)", "self.pose_retriever.inquire(global_img_feat_i, mem)", "self._recurrent_rollout(", "self.pose_retriever.update_mem(")
     required_dpt = ("class DPTPts3dPose", "self.pose_head = PoseDecoder(hidden_size=in_dim)", "pose_token = x[-1][:, 0].clone()", "pose = self.pose_head(pose_token)", "pose = postprocess_pose(pose, self.pose_mode)")
-    if any(fragment not in global_method for fragment in required_global) or any(fragment not in lighter for fragment in required_lighter) or any(fragment not in dpt for fragment in required_dpt) or "def postprocess_pose(out, mode, inverse=False):" not in postprocess or "img = img.resize((512, 384))" not in image_loader or "n_tokens = H * W" not in patch_embed:
+    required_loader = (
+        "def load_images_for_eval(",
+        "# resize long side to 512",
+        "img = img.crop((cx - halfw, cy - halfh, cx + halfw, cy + halfh))",
+    )
+    if any(fragment not in global_method for fragment in required_global) or any(fragment not in lighter for fragment in required_lighter) or any(fragment not in dpt for fragment in required_dpt) or any(fragment not in image_loader for fragment in required_loader) or "def postprocess_pose(out, mode, inverse=False):" not in postprocess or "n_tokens = H * W" not in patch_embed:
         raise EncoderGlobalPooledPoseError("pinned ReCal3R encoder-global topology changed")
     try:
         native_global_at = lighter.index(required_lighter[0])
@@ -163,15 +168,21 @@ def audit_pinned_encoder_global_pose_sources(
         body = runner[runner.index("\ndef run_encoder_global_pooled_pose_recurrent_lighter(") + 1:]
         runner_global_at = body.index("global_img_feat_i = model._get_img_level_feat(feat_i)")
         runner_capture_at = body.index("capture_encoder_global_pose_token(", runner_global_at)
+        runner_pose_branch_at = body.index("if model.pose_head_flag:\n            pose_feat_i", runner_capture_at)
         runner_inquire_at = body.index("model.pose_retriever.inquire(global_img_feat_i, mem)", runner_capture_at)
         runner_rollout_at = body.index("model._recurrent_rollout(", runner_inquire_at)
         runner_update_at = body.index("model.pose_retriever.update_mem(", runner_rollout_at)
     except ValueError as error:
         raise EncoderGlobalPooledPoseError("pinned encoder-global capture/source order changed") from error
-    if not (native_global_at < native_inquire_at < native_rollout_at < native_update_at and runner_global_at < runner_capture_at < runner_inquire_at < runner_rollout_at < runner_update_at):
+    if not (native_global_at < native_inquire_at < native_rollout_at < native_update_at and runner_global_at < runner_capture_at < runner_pose_branch_at < runner_inquire_at < runner_rollout_at < runner_update_at):
         raise EncoderGlobalPooledPoseError("pinned encoder-global capture/source order changed")
-    capture_region = body[runner_global_at:runner_inquire_at]
-    forbidden_capture = ("dec[", "pose_token", "pose_retriever.inquire", "camera_pose", "prediction", ".cpu(", ".numpy(", ".tolist(", "ground_truth", "future", "anchor", "history", "fallback")
+    # This is precisely the candidate's pre-retrieval capture region.  Do not
+    # extend it into the ordinary pose branch: that branch legitimately reads
+    # ``model.pose_token`` after v11 has already detached its independent
+    # encoder-global token.  The qualified marker avoids treating the name of
+    # the required capture helper itself as a forbidden pose-token source.
+    capture_region = body[runner_global_at:runner_pose_branch_at]
+    forbidden_capture = ("dec[", "model.pose_token", "pose_retriever.inquire", "camera_pose", "prediction", ".cpu(", ".numpy(", ".tolist(", "ground_truth", "future", "anchor", "history", "fallback")
     if any(marker in capture_region for marker in forbidden_capture):
         raise EncoderGlobalPooledPoseError("v11 capture boundary contains a forbidden input")
     source_hashes = {
