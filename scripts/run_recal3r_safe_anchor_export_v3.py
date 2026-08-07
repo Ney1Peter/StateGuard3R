@@ -122,7 +122,7 @@ class _V3Observer:
         else:
             self._detector.commit(observation.record)
             self.observed_ledger.append(replace(observation.record, decision="commit"))
-            self._previous_safe_camera = observation.raw_pose.detach().clone()
+            self._previous_safe_camera = self._decode(observation.raw_pose.detach().clone()).detach().clone()
             exported, action = self._exporter.commit_real(observation.frame_id, prediction)
         return exported, {"export_action": action.action, "anchor_frame_ids": list(action.anchor_frame_ids) if action.anchor_frame_ids is not None else None}
 
