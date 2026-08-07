@@ -1,7 +1,7 @@
 # Recovery-policy development v1：因果诊断与候选定型执行计划
 
 - 制定日期：2026-08-07
-- 状态：**执行中**
+- 状态：**已完成 — `DEVELOPMENT_RECOVERY_FEASIBILITY_NO_GO`**
 - 计划窗口：12--18 小时；以门禁完成为终点，而不是以时间耗尽为终点
 - 上一阶段：[Recovery-quality v1 正式 NO-GO](audits/recovery-quality-v1-result.md)
 - 受保护 baseline：ReCal3R `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
@@ -126,3 +126,16 @@ baseline health、model-ready RGB visual overlap 和原始 RGB capture timestamp
    仅当 candidate ready 时再写一个**尚未执行**的新盲测 acquisition/commitment plan。
 
 最终报告必须区分：已验证的 H0/H1 机械事实、开发数据上的探索性数值、以及尚未得到的新盲测质量结论。
+
+## 6. 执行结果（2026-08-07）
+
+Gate A、B、C 和 D 均已按本计划执行完毕，详细证据见
+[recovery-policy-development-v1-result.md](audits/recovery-policy-development-v1-result.md)。
+H0 的八对只读 forensic 比较全部成立；三个真实 detector-driven discard run 均在 clear frame 起改变了
+trajectory 与 prediction，因此 H1 的机械因果前提也成立。
+
+但 discard 在 dynamic、wrong 和 low 三条 disclosed development corruption 中，没有任何一条同时获得
+正的 ATE 与 translation-RPE effect；两项 effect 的中位数分别为 -0.2051% 和 -0.3418%，并且
+discard/baseline runtime ratio 的中位数为 1.7541。它不满足 Gate D 的任一质量门槛组合，因此本计划的
+正常唯一结束状态是 **`DEVELOPMENT_RECOVERY_FEASIBILITY_NO_GO`**。不得在本计划下继续搜索、调参、
+下载新数据或建立新的盲测 commitment。

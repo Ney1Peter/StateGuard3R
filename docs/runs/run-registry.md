@@ -1804,6 +1804,36 @@ launched or created.
   retained two CPU-only alarm import-path failures before the one accepted output and the shadow
   replay limitation; no successful formal artifact was overwritten or rerun.
 
+### RECOVERY-POLICY-DEVELOPMENT-V1-0001: disclosed development discard feasibility
+
+- Status: **completed — `DEVELOPMENT_RECOVERY_FEASIBILITY_NO_GO`**.
+- Scope: the three already-disclosed development manifests only; no formal output was rerun or
+  changed, and no data set or weight was downloaded.
+- H0 forensic: `outputs/recovery-policy-h0-analysis-0001/h0-analysis.json`, SHA-256
+  `d0de5e8bc5ca96615b6cfd0c3cd47a5705f47da81b0d6541e366afb289de60c2`; all 8 public formal
+  pairs had byte-identical model outputs and all 13 replay releases reinstalled the held post-state.
+- Matrix: baseline/always-commit/replay/discard for dynamic, wrong and low. All 12 accepted
+  outputs are frozen `0555/0444`, have `status=succeeded`, 30 frames and 30 health rows. The
+  candidate code is development-only and pinned by `c3201a2`, `74a52a0` and their tests.
+- Detector: each frozen shadow alarm has real policy rising edge 15; every policy run held frame
+  16 and released at 17. Discard did not reinstall frame-16 post-state, and its trajectory and
+  prediction summary first differ from replay at frame 17 in all 3 conditions.
+- CPU evaluation: `outputs/recovery-policy-development-v1-{dynamic,wrong,low}-evaluation-0001`;
+  evaluation SHA-256 values are respectively
+  `397d2dd647e4767fb052dece8368f47562108e852438372a1c35706b90cdd662`,
+  `7c7fc6ba6aed553d9c470ac7140a9a71d0448be9200a68a442ad8d7f86d34eac`, and
+  `3121e2e55bc0e916b40035f99928395e078f1e25ec349a20b688c45fa4240adf`.
+- Decision facts: discard has both positive ATE and translation-RPE effect in 0/3 trials; the
+  median effects are -0.2051% and -0.3418%; discard/baseline runtime median is 1.7541 (limit
+  1.20). The required quality gate therefore fails despite the successful causal-state mechanism.
+- GPU: serial `CUDA_VISIBLE_DEVICES=2` on NVIDIA L20 UUID
+  `GPU-d2be321e-2001-7e74-d0f0-3ee103fcd250`, after >=12 GiB free-memory preflights and without
+  interfering with existing PIDs. One retained dynamic postflight has a blank shell exit field
+  from an tmux quoting mistake; its frozen `run.json` is succeeded, while all later new forwards
+  recorded exit 0.
+- Audit: [recovery-policy-development-v1-result.md](../audits/recovery-policy-development-v1-result.md).
+  No new blind-test acquisition/commitment is authorized by this NO-GO.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
