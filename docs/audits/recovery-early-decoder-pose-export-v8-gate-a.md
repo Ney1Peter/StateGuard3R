@@ -57,7 +57,7 @@ future，以及 decoder/export modules 中 `.cpu()`、`.numpy()`、`.tolist()`�
 | --- | --- |
 | ReCal3R Torch targeted v8 tests | `32 passed in 12.88s` |
 | checkpoint-loaded official DPT CPU check | pass；加载已有 `cut3r_512_dpt_4_64.pth`，strict audit 无 missing/unexpected key；pinned `DPTPts3dPose`、official postprocess/camera、float64 SO(3) contract 通过 |
-| full project CPU suite | `509 passed, 28 skipped in 49.41s` |
+| full project CPU suite | `509 passed, 28 skipped in 50.43s` |
 | compileall (`src scripts tests`) | pass |
 | `git diff --check` and both worktrees | pass；StateGuard3R/ReCal3R clean |
 
@@ -76,7 +76,7 @@ PYTHONPATH="src:/data/wangzheng/Project2/baselines/ReCal3R/.venv/lib/python3.11/
 ```
 
 The full suite uses `CUDA_VISIBLE_DEVICES=''`, `PYTHONPATH=src`, and
-`--basetemp "$PWD/tmp/pytest-v8-gate-a-full-0001"`. Its 28 skips are expected only in that
+`--basetemp "$PWD/tmp/pytest-v8-gate-a-0003"`. Its 28 skips are expected only in that
 Torch-free project interpreter; all v8 Torch tests run in the targeted command above.
 
 ## Gate B authorization and stop rule
