@@ -20,7 +20,7 @@ import random
 import stat
 import sys
 import time
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 # Direct ``python scripts/...`` execution places ``scripts`` rather than the
 # repository root on sys.path.  Add only this repository root before importing
@@ -310,6 +310,54 @@ def _run_without_grad(torch: Any, callback: Any) -> Any:
         return callback()
 
 
+def _trace_frame_id(value: Any) -> int:
+    item = getattr(value, "item", None)
+    raw = item() if callable(item) else value
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise RuntimeError("calibration trace frame_step is not an integer")
+    return raw
+
+
+def _restore_discarded_trace_summaries(
+    trace: Mapping[str, Any], *, discarded_frame_ids: Sequence[int], summaries: Mapping[int, Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Merge observed held-frame summaries into the post-discard health trace.
+
+    This is ledger reconstruction only: the model remains at its safe committed
+    state.  No recovered summary is ever supplied to the detector or policy.
+    """
+
+    required = ("frame_step", "frame_u_mean", "frame_u_min", "frame_u_max", "frame_h_mean", "frame_h_min", "frame_h_max")
+    values = {key: trace.get(key) for key in required}
+    frame_steps = values["frame_step"]
+    if not isinstance(frame_steps, (list, tuple)):
+        raise RuntimeError("ReCal3R trace lacks frame_step entries")
+    rows: dict[int, dict[str, Any]] = {}
+    for index, step in enumerate(frame_steps):
+        frame_id = _trace_frame_id(step)
+        if frame_id in rows:
+            raise RuntimeError("ReCal3R trace repeats a frame step")
+        row: dict[str, Any] = {}
+        for key, series in values.items():
+            if not isinstance(series, (list, tuple)) or len(series) != len(frame_steps):
+                raise RuntimeError(f"ReCal3R trace {key} is misaligned")
+            row[key] = series[index]
+        rows[frame_id] = row
+    for frame_id in discarded_frame_ids:
+        if frame_id in rows:
+            raise RuntimeError("discarded frame unexpectedly remains in final model trace")
+        summary = summaries.get(frame_id)
+        if not isinstance(summary, Mapping) or set(summary) != set(required):
+            raise RuntimeError("discarded frame lacks an observed calibration summary")
+        if _trace_frame_id(summary["frame_step"]) != frame_id:
+            raise RuntimeError("discarded calibration summary frame ID differs")
+        rows[frame_id] = dict(summary)
+    restored = dict(trace)
+    for key in required:
+        restored[key] = [rows[frame_id][key] for frame_id in sorted(rows)]
+    return restored
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -483,6 +531,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     trace = model.get_u_calibration_trace()
     if not isinstance(trace, dict):
         raise RuntimeError("ReCal3R calibration trace is unavailable")
+    if result.release_mode == "discard":
+        trace = _restore_discarded_trace_summaries(
+            trace,
+            discarded_frame_ids=result.discarded_transaction_frame_ids,
+            summaries=result.candidate_calibration_summaries,
+        )
     health = adapt_recal3r_trace(
         trace,
         all_frame_ids=list(range(len(views))),
@@ -538,6 +592,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "transactions": result.timeline,
         "dropped_transaction_frame_ids": result.dropped_transaction_frame_ids,
         "discarded_transaction_frame_ids": result.discarded_transaction_frame_ids,
+        "discarded_frame_health_summaries": sorted(result.candidate_calibration_summaries),
         "release_mode": result.release_mode,
     }
     smoke._write_json_atomic(args.output_dir / "state-timeline.json", timeline_payload)

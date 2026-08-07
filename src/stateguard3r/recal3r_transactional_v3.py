@@ -48,6 +48,7 @@ class TransactionalReCal3RResult:
     timeline: list[Mapping[str, Any]]
     dropped_transaction_frame_ids: list[int]
     discarded_transaction_frame_ids: list[int]
+    candidate_calibration_summaries: Mapping[int, Mapping[str, Any]]
     release_mode: str
     source_provenance: Mapping[str, Any]
 
@@ -75,6 +76,56 @@ def _timeline_entry(
         "proposed_state_digest_sha256": canonical_digest(transaction.post_state.digest()),
         "committed_state_digest_sha256": canonical_digest(committed_state.digest()),
     }
+
+
+CALIBRATION_SUMMARY_KEYS = (
+    "frame_step",
+    "frame_u_mean",
+    "frame_u_min",
+    "frame_u_max",
+    "frame_h_mean",
+    "frame_h_min",
+    "frame_h_max",
+)
+
+
+def _single_frame_id(value: Any, *, label: str) -> int:
+    item = getattr(value, "item", None)
+    raw = item() if callable(item) else value
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise TransactionalReCal3RError(f"{label} must be an integer frame ID")
+    return raw
+
+
+def _candidate_calibration_summary(transaction: StateTransaction) -> Mapping[str, Any] | None:
+    """Capture one observed trace row before a discard restores model state.
+
+    The state-policy decision may intentionally remove a candidate from the
+    model's eventual mutable trace.  Its observed, already-computed health
+    summary remains useful for a complete post-run ledger, but is never fed
+    back into the policy (which consumes the separately frozen baseline alarm).
+    """
+
+    snapshot = transaction.post_model.attributes.get("_u_calibration_trace")
+    if snapshot is None or not snapshot.exists or not isinstance(snapshot.value, Mapping):
+        return None
+    trace = snapshot.value
+    frame_steps = trace.get("frame_step")
+    if not isinstance(frame_steps, (list, tuple)):
+        raise TransactionalReCal3RError("candidate calibration trace lacks frame_step entries")
+    matches = [index for index, value in enumerate(frame_steps) if _single_frame_id(value, label="candidate trace step") == transaction.frame_id]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise TransactionalReCal3RError("candidate calibration trace repeats a frame step")
+    index = matches[0]
+    summary: dict[str, Any] = {}
+    for key in CALIBRATION_SUMMARY_KEYS:
+        values = trace.get(key)
+        if not isinstance(values, (list, tuple)) or len(values) != len(frame_steps):
+            raise TransactionalReCal3RError(f"candidate calibration trace {key} is misaligned")
+        summary[key] = values[index]
+    return summary
 
 
 def run_transactional_recurrent_lighter(
@@ -122,6 +173,7 @@ def run_transactional_recurrent_lighter(
     state_closures: list[StateClosure] = []
     timeline: list[Mapping[str, Any]] = []
     discarded_transaction_frame_ids: list[int] = []
+    candidate_calibration_summaries: dict[int, Mapping[str, Any]] = {}
     reset_mask: Any = False
     if model._uses_update_pressure_update() and hasattr(model, "update_pressure"):
         del model.update_pressure
@@ -284,6 +336,9 @@ def run_transactional_recurrent_lighter(
             pre_reset_mask=pre_reset_mask,
             post_reset_mask=_clone_reset_mask(reset_mask),
         )
+        candidate_summary = _candidate_calibration_summary(transaction)
+        if candidate_summary is not None:
+            candidate_calibration_summaries[i] = candidate_summary
         decision = controller.decide_candidate(transaction)
         if decision.action == "hold":
             transaction.pre_model.restore(model, torch=torch)
@@ -323,6 +378,7 @@ def run_transactional_recurrent_lighter(
         timeline=timeline,
         dropped_transaction_frame_ids=[transaction.frame_id for transaction in dropped],
         discarded_transaction_frame_ids=discarded_transaction_frame_ids,
+        candidate_calibration_summaries=candidate_calibration_summaries,
         release_mode=release_mode,
         source_provenance=source_provenance,
     )
