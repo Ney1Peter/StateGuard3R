@@ -69,6 +69,13 @@ def _self_provenance() -> dict[str, Any]:
     }
 
 
+def _run_without_grad(torch: Any, operation: Any) -> Any:
+    """Keep recurrent inference explicitly inside the isolated no-grad scope."""
+
+    with torch.no_grad():
+        return operation()
+
+
 def _frozen_json(path: Path, *, label: str) -> tuple[dict[str, Any], dict[str, Any]]:
     resolved = path.resolve(strict=True)
     metadata = os.lstat(resolved)
@@ -358,7 +365,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             torch.cuda.synchronize(device)
             torch.cuda.reset_peak_memory_stats(device)
         started = time.perf_counter()
-        result = smoke._run_without_grad(
+        result = _run_without_grad(
             torch,
             lambda: run_online_quarantine_recurrent_lighter(
                 views,
