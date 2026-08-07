@@ -14,6 +14,7 @@ from scripts.run_recal3r_state_policy_v3 import (
     _detector_v3_alarms,
     _parser,
     _quality_v1_alarms,
+    _restore_discarded_trace_summaries,
     _run_without_grad,
     _validate_development_discard_manifest,
     _validate_policy_args,
@@ -186,6 +187,39 @@ def test_development_discard_manifest_is_schema_and_root_guarded(
             ),
             _parser(),
         )
+
+
+def test_discard_health_trace_restores_only_observed_candidate_summary() -> None:
+    trace = {
+        "frame_step": [1, 3],
+        "frame_u_mean": [0.1, 0.3],
+        "frame_u_min": [0.01, 0.03],
+        "frame_u_max": [0.11, 0.33],
+        "frame_h_mean": [0.2, 0.4],
+        "frame_h_min": [0.02, 0.04],
+        "frame_h_max": [0.22, 0.44],
+        "delta_norm": [],
+        "frame_idx": [],
+    }
+    summary = {
+        2: {
+            "frame_step": 2,
+            "frame_u_mean": 0.2,
+            "frame_u_min": 0.02,
+            "frame_u_max": 0.22,
+            "frame_h_mean": 0.3,
+            "frame_h_min": 0.03,
+            "frame_h_max": 0.33,
+        }
+    }
+
+    restored = _restore_discarded_trace_summaries(
+        trace, discarded_frame_ids=[2], summaries=summary
+    )
+
+    assert restored["frame_step"] == [1, 2, 3]
+    assert restored["frame_u_mean"] == [0.1, 0.2, 0.3]
+    assert trace["frame_step"] == [1, 3]
 
 
 def test_detector_policy_reads_only_frozen_hybrid_alarm_and_bound_input(tmp_path: Path) -> None:
