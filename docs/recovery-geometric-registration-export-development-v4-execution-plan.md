@@ -33,6 +33,12 @@ v3 fallback、hold 或任何 donor pose。
    proper SO(3)）直接 `REGISTRATION_UNAVAILABLE_FAIL_CLOSED`，不输出混合结果；这是 deployment infeasibility，
    不是允许 retune 的信号。
 
+固定 registration config（在实现与任何 v4 forward 前锁定）：复用 frozen v2 ORB `nfeatures=2000`、ratio
+`0.70`、single-thread seed `0`；3D RANSAC seed `0`、256 hypotheses、每项 3 pairs、至少 24 个 finite pairs、至少
+16 inliers；inlier cutoff 为 `0.05 * max(median_l2(anchor_3d), 1e-3)`，并要求 sampled/inlier centered rank 3、
+proper rotation determinant `+1`。像素 correspondence 以 nearest integer indexing 读取同分辨率 pointmap。以上皆非
+由 v3 quality 数值选择，v4 内不得改动。
+
 ## 2. 不可变边界
 
 - 仅使用三个只读 development manifests；不下载数据、权重或依赖，不读取/重跑/覆盖
