@@ -42,6 +42,10 @@ def audit_v8_runner_contract(runner_path: Path) -> Mapping[str, Any]:
     v8-only copy.
     """
     source = runner_path.read_text(encoding="utf-8")
+    try:
+        body = source[source.index("\ndef run_early_decoder_pose_recurrent_lighter(") + 1:]
+    except ValueError as error:
+        raise EarlyDecoderPoseRunnerError("v8 runner entry point is missing") from error
     rollout = "model._recurrent_rollout("
     capture = "early_decoder_pose_token = dec[0][:, 0:1].detach().clone() if observer is not None else None"
     update = "model.pose_retriever.update_mem("
@@ -49,34 +53,34 @@ def audit_v8_runner_contract(runner_path: Path) -> Mapping[str, Any]:
     candidate_transfer = "predictions.append(to_cpu(exported))"
     control_transfer = "predictions.append(to_cpu(res))"
     try:
-        rollout_at = source.index(rollout)
-        capture_at = source.index(capture, rollout_at)
-        update_at = source.index(update, capture_at)
-        control_at = source.index("if observer is None:", update_at)
-        candidate_at = source.index("else:\n            observation = observer.observe", control_at)
-        finalize_at = source.index(finalize, candidate_at)
-        candidate_transfer_at = source.index(candidate_transfer, finalize_at)
-        control_transfer_at = source.index(control_transfer, control_at, candidate_at)
+        rollout_at = body.index(rollout)
+        capture_at = body.index(capture, rollout_at)
+        update_at = body.index(update, capture_at)
+        control_at = body.index("if observer is None:", update_at)
+        candidate_at = body.index("else:\n            observation = observer.observe", control_at)
+        finalize_at = body.index(finalize, candidate_at)
+        candidate_transfer_at = body.index(candidate_transfer, finalize_at)
+        control_transfer_at = body.index(control_transfer, control_at, candidate_at)
     except ValueError as error:
         raise EarlyDecoderPoseRunnerError("v8 runner source contract changed") from error
     if not (rollout_at < capture_at < update_at):
         raise EarlyDecoderPoseRunnerError("v8 early decoder capture is not after rollout before memory update")
     if not (candidate_at < finalize_at < candidate_transfer_at) or control_transfer_at < control_at:
         raise EarlyDecoderPoseRunnerError("v8 export/control transfer order changed")
-    control = source[control_at:candidate_at]
+    control = body[control_at:candidate_at]
     if "early_decoder_pose_token =" in control or "observer." in control:
         raise EarlyDecoderPoseRunnerError("v8 always-control path is contaminated by candidate policy work")
-    forbidden = (
-        "recal3r_safe_anchor_runner_v3",
-        "recal3r_geometric_registration_runner_v4",
-        "recal3r_current_pointmap_runner_v5",
-        "recal3r_prerollout_pose_query_runner_v6",
-        "safe_anchor_export_v3",
-        "geometric_registration_export_v4",
-        "current_pointmap_consensus_export_v5",
-        "prerollout_pose_query_export_v6",
+    previous_recovery_markers = (
+        ("recal3r_", "safe_anchor_runner_v3"),
+        ("recal3r_", "geometric_registration_runner_v4"),
+        ("recal3r_", "current_pointmap_runner_v5"),
+        ("recal3r_", "prerollout_pose_query_runner_v6"),
+        ("safe_", "anchor_export_v3"),
+        ("geometric_", "registration_export_v4"),
+        ("current_", "pointmap_consensus_export_v5"),
+        ("prerollout_", "pose_query_export_v6"),
     )
-    if any(fragment in source for fragment in forbidden):
+    if any(prefix + suffix in body for prefix, suffix in previous_recovery_markers):
         raise EarlyDecoderPoseRunnerError("v8 runner delegates to a previous recovery mechanism")
     return {
         "runner_path": str(runner_path.resolve(strict=True)),

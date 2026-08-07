@@ -28,6 +28,10 @@ smoke = v2.smoke
 SCHEMA_VERSION = "stateguard3r.recal3r-early-decoder-pose-export-v8.v1"
 EARLY_DECODER_TOKEN_SOURCE = "decoder_layer_0_after_rollout_before_update_mem"
 DEVELOPMENT_INPUT_ROOT = ROOT / "outputs" / "formal-v1-inputs-0001" / "development"
+DEVELOPMENT_MANIFESTS = frozenset(
+    DEVELOPMENT_INPUT_ROOT / f"development-{condition}" / "input-manifest.json"
+    for condition in ("dynamic", "wrong", "low")
+)
 FORMAL_V3_CONFIG = ROOT / "outputs" / "formal-v3-calibration-0001" / "formal-config.json"
 V8_COMPONENTS = (
     ROOT / "scripts" / "run_recal3r_early_decoder_pose_export_v8.py",
@@ -59,7 +63,7 @@ def _validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     if args.input_manifest is None:
         parser.error("v8 early decoder pose requires a development input manifest")
     manifest = args.input_manifest.resolve(strict=True)
-    if DEVELOPMENT_INPUT_ROOT.resolve() not in manifest.parents:
+    if manifest not in {path.resolve(strict=True) for path in DEVELOPMENT_MANIFESTS}:
         parser.error("v8 early decoder pose accepts only disclosed development manifests")
     payload = json.loads(manifest.read_bytes())
     if not isinstance(payload, dict) or payload.get("schema_version") != "stateguard3r.corruption.v1" or payload.get("source_is_read_only") is not True:
@@ -124,11 +128,15 @@ def _median_numpy_equivalent(torch: Any, values: Any) -> Any:
     return ordered[length // 2] if length % 2 else (ordered[length // 2 - 1] + ordered[length // 2]) / 2
 
 
-def _pose_sha256(value: Any) -> str:
-    tensor = value.detach().cpu().contiguous()
+def _pose_gpu_digest(value: Any, *, torch: Any) -> str:
+    tensor = value.detach().contiguous()
     if not bool(tensor.isfinite().all()):
         raise RuntimeError("v8 pose audit tensor is nonfinite")
-    return hashlib.sha256(tensor.numpy().tobytes(order="C")).hexdigest()
+    flat = tensor.reshape(-1).to(dtype=torch.float64)
+    positions = torch.arange(1, flat.numel() + 1, dtype=torch.float64, device=flat.device)
+    moments = (flat.sum(), flat.abs().sum(), (flat * positions).sum(), flat.square().sum(), flat.min(), flat.max())
+    payload = "|".join((str(tuple(tensor.shape)), str(tensor.dtype), *(float(item.item()).hex() for item in moments)))
+    return "gpu-fingerprint-v1:" + hashlib.sha256(payload.encode("ascii")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -188,7 +196,7 @@ class _V8Observer:
 
     def finalize(self, observation: _Observation, *, quarantined: bool, prediction: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
         self.records.append(observation.record)
-        raw_digest = _pose_sha256(prediction["camera_pose"])
+        raw_digest = _pose_gpu_digest(prediction["camera_pose"], torch=self._torch)
         if quarantined:
             self._detector.quarantine(observation.record)
             self.observed_ledger.append(replace(observation.record, decision="quarantine_current_rollback"))
@@ -204,8 +212,8 @@ class _V8Observer:
         return exported, {
             "export_action": action.action,
             "early_decoder_pose_token": token_evidence,
-            "raw_candidate_pose_sha256": raw_digest,
-            "exported_camera_pose_sha256": _pose_sha256(exported["camera_pose"]),
+            "raw_candidate_pose_digest": raw_digest,
+            "exported_camera_pose_digest": _pose_gpu_digest(exported["camera_pose"], torch=self._torch),
         }
 
     def timeline_evidence(self, observation: _Observation) -> Mapping[str, Any]:
@@ -241,7 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from stateguard3r.health import adapt_recal3r_trace, write_health_jsonl_atomic
     from stateguard3r.online_detector_incremental_v3 import IncrementalOnlinePrefixDetector
     from stateguard3r.online_detector_v2 import FrozenDetectorV3Config
-    from stateguard3r.recal3r_early_decoder_pose_runner_v8 import run_early_decoder_pose_recurrent_lighter
+    from stateguard3r.recal3r_early_decoder_pose_runner_v8 import audit_v8_runner_contract, run_early_decoder_pose_recurrent_lighter
     from stateguard3r.timestamp_order_v3 import capture_timestamp_records, timestamp_order_sidecar, validate_timestamp_order_sidecar
     if args.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA requested but unavailable")
@@ -255,6 +263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sys.path.insert(0, str(source_root))
     smoke._verify_preflight_inputs(args)
     early_decoder_pose_source_audit = audit_pinned_early_decoder_pose_sources(args.baseline_src / "dust3r" / "model.py", args.baseline_src / "dust3r" / "heads" / "dpt_head.py", args.baseline_src / "dust3r" / "heads" / "postprocess.py", ROOT / "src" / "stateguard3r" / "recal3r_early_decoder_pose_runner_v8.py")
+    early_decoder_runner_audit = audit_v8_runner_contract(ROOT / "src" / "stateguard3r" / "recal3r_early_decoder_pose_runner_v8.py")
     views = smoke._prepare_input_views(args, torch)
     captures, capture_provenance = capture_timestamp_records([frame.path for frame in args.input_manifest_data.frames], rgb_txt=args.rgb_timestamp_listing, dataset_root=args.timestamp_dataset_root)
     sidecar = timestamp_order_sidecar(captures, provenance=capture_provenance)
@@ -353,6 +362,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "watchdog": args.watchdog,
             "causality": "detector consumes current/past raw candidate health, adjacent model-ready RGB overlap, and current/past capture timestamps; alarm export consumes only a captured current early-decoder pose token through frozen pose head/postprocess; raw camera_pose is never a numerical v8 export input; no export feeds model, detector, state, or later frame",
             "early_decoder_pose_source_audit": early_decoder_pose_source_audit,
+            "early_decoder_runner_audit": early_decoder_runner_audit,
             "pending_transaction_count": 0,
             "source_provenance": result.source_provenance,
             "transactions": result.timeline,
@@ -370,6 +380,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "runner": runner_provenance,
             "v8_components": component_provenance,
             "early_decoder_pose_source_audit": early_decoder_pose_source_audit,
+            "early_decoder_runner_audit": early_decoder_runner_audit,
             "checkpoint": str(args.checkpoint),
             "checkpoint_sha256": args.checkpoint_sha256,
             "input_manifest": smoke._input_manifest_metadata(args),

@@ -11,6 +11,11 @@ from typing import Any, Callable, Mapping
 
 QUERY_SHAPE = (1, 1, 768)
 ROTATION_ATOL = 1e-8
+PINNED_RECAL3R_SOURCE_SHA256 = {
+    "model_sha256": "32785a6f29fded66aa142207b29a33d7522f0c39aa068fe2175a956ec8dbc3c1",
+    "dpt_head_sha256": "c4f4b08c844b5fea47b67cedbcf4888719e8664f4b3b7e7ab6218e33cf63a66e",
+    "postprocess_sha256": "ee93ae7fa16897ed9163a21efe225f46193054b19bd7d316402545ed766133d7",
+}
 
 
 class EarlyDecoderPoseError(RuntimeError):
@@ -101,21 +106,32 @@ def audit_pinned_early_decoder_pose_sources(model_path: Path, dpt_head_path: Pat
     )
     if any(fragment not in lighter for fragment in required_model) or any(fragment not in dpt for fragment in required_dpt) or "def postprocess_pose(out, mode, inverse=False):" not in postprocess:
         raise EarlyDecoderPoseError("pinned ReCal3R early-decoder pose topology changed")
-    rollout_at = lighter.index(required_model[2])
-    final_token_at = lighter.index(required_model[3], rollout_at)
-    update_at = lighter.index(required_model[4], final_token_at)
-    runner_rollout_at = runner.index("model._recurrent_rollout(")
-    runner_capture_at = runner.index("early_decoder_pose_token = dec[0][:, 0:1].detach().clone() if observer is not None")
-    runner_update_at = runner.index("model.pose_retriever.update_mem(", runner_rollout_at)
+    try:
+        rollout_at = lighter.index(required_model[2])
+        final_token_at = lighter.index(required_model[3], rollout_at)
+        update_at = lighter.index(required_model[4], final_token_at)
+        runner_body = runner[runner.index("\ndef run_early_decoder_pose_recurrent_lighter(") + 1:]
+        runner_rollout_at = runner_body.index("model._recurrent_rollout(")
+        runner_capture_at = runner_body.index("early_decoder_pose_token = dec[0][:, 0:1].detach().clone() if observer is not None")
+        runner_update_at = runner_body.index("model.pose_retriever.update_mem(", runner_rollout_at)
+    except ValueError as error:
+        raise EarlyDecoderPoseError("pinned early decoder token/source update order changed") from error
     if not (rollout_at < final_token_at < update_at and runner_rollout_at < runner_capture_at < runner_update_at):
         raise EarlyDecoderPoseError("pinned early decoder token/source update order changed")
+    source_hashes = {
+        "model_sha256": hashlib.sha256(model.encode("utf-8")).hexdigest(),
+        "dpt_head_sha256": hashlib.sha256(dpt.encode("utf-8")).hexdigest(),
+        "postprocess_sha256": hashlib.sha256(postprocess.encode("utf-8")).hexdigest(),
+    }
+    if source_hashes != PINNED_RECAL3R_SOURCE_SHA256:
+        raise EarlyDecoderPoseError("pinned ReCal3R early-decoder source SHA-256 differs")
     return {
         "model_path": str(model_path.resolve(strict=True)),
-        "model_sha256": hashlib.sha256(model.encode("utf-8")).hexdigest(),
+        "model_sha256": source_hashes["model_sha256"],
         "dpt_head_path": str(dpt_head_path.resolve(strict=True)),
-        "dpt_head_sha256": hashlib.sha256(dpt.encode("utf-8")).hexdigest(),
+        "dpt_head_sha256": source_hashes["dpt_head_sha256"],
         "postprocess_path": str(postprocess_path.resolve(strict=True)),
-        "postprocess_sha256": hashlib.sha256(postprocess.encode("utf-8")).hexdigest(),
+        "postprocess_sha256": source_hashes["postprocess_sha256"],
         "runner_path": str(runner_path.resolve(strict=True)),
         "runner_sha256": hashlib.sha256(runner.encode("utf-8")).hexdigest(),
         "early_decoder_token_source": "decoder_layer_0_after_rollout_before_update_mem",
@@ -127,4 +143,4 @@ def audit_pinned_early_decoder_pose_sources(model_path: Path, dpt_head_path: Pat
     }
 
 
-__all__ = ["EarlyDecoderPoseError", "EarlyDecoderPoseResult", "QUERY_SHAPE", "ROTATION_ATOL", "audit_pinned_early_decoder_pose_sources", "decode_early_decoder_pose_token"]
+__all__ = ["EarlyDecoderPoseError", "EarlyDecoderPoseResult", "PINNED_RECAL3R_SOURCE_SHA256", "QUERY_SHAPE", "ROTATION_ATOL", "audit_pinned_early_decoder_pose_sources", "decode_early_decoder_pose_token"]
