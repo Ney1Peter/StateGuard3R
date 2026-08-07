@@ -182,8 +182,9 @@ class _OnlineOverlap:
 class _HealthObserver:
     """Keep observed rollback health outside the detector's committed prefix."""
 
-    def __init__(self, detector: Any, *, torch: Any, pose_encoding_to_camera: Any, np: Any) -> None:
+    def __init__(self, detector: Any, *, timestamps: Sequence[Any], torch: Any, pose_encoding_to_camera: Any, np: Any) -> None:
         self._detector = detector
+        self._timestamps = list(timestamps)
         self._torch = torch
         self._pose_encoding_to_camera = pose_encoding_to_camera
         self._np = np
@@ -197,7 +198,12 @@ class _HealthObserver:
         trace = model.get_u_calibration_trace()
         if not isinstance(trace, Mapping):
             raise RuntimeError("online quarantine candidate lacks ReCal3R trace")
-        trace_records = adapt_recal3r_trace(trace, all_frame_ids=list(range(frame_id + 1)), batch_size=1)
+        trace_records = adapt_recal3r_trace(
+            trace,
+            all_frame_ids=list(range(frame_id + 1)),
+            timestamps=self._timestamps[: frame_id + 1],
+            batch_size=1,
+        )
         if len(trace_records) != frame_id + 1:
             raise RuntimeError("online quarantine candidate trace is not prefix-aligned")
         signals = [prediction] if self._previous_safe_prediction is None else [self._previous_safe_prediction, prediction]
@@ -334,6 +340,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         observer = (
             _HealthObserver(
                 OnlinePrefixDetector(frozen_detector, captures=captures, capture_provenance=capture_provenance),
+                timestamps=smoke._input_timestamps(args),
                 torch=torch,
                 pose_encoding_to_camera=dust3r_camera_module.pose_encoding_to_camera,
                 np=np,
@@ -376,7 +383,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not isinstance(trace, Mapping):
                 raise RuntimeError("always-commit trace is unavailable")
             health = smoke._apply_v2_overlap_to_health(
-                [replace(record, pose_jump=pose_jumps[index], geometric_residual=geometric_residuals[index]) for index, record in enumerate(adapt_recal3r_trace(trace, all_frame_ids=list(range(len(views))), batch_size=1))],
+                [
+                    replace(record, pose_jump=pose_jumps[index], geometric_residual=geometric_residuals[index])
+                    for index, record in enumerate(
+                        adapt_recal3r_trace(
+                            trace,
+                            all_frame_ids=list(range(len(views))),
+                            timestamps=smoke._input_timestamps(args),
+                            batch_size=1,
+                        )
+                    )
+                ],
                 overlaps.values,
             )
             observed_ledger = None
@@ -391,13 +408,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             write_health_jsonl_atomic(staging / "observed-health-ledger.jsonl", observed_ledger)
         smoke._write_json_atomic(staging / "predictions-summary.json", prediction_summary)
         safe_frames = _safe_input_frames(args)
+        legacy_reference = smoke._input_frame_metadata(args)[0]
         smoke._write_json_atomic(
             staging / "trajectory.json",
             {
                 "schema_version": "stateguard3r.trajectory.v0",
                 "pose_encoding": "absT_quaR",
                 "matrix_convention": "camera_to_first_input_frame_reference",
-                "reference_frame": safe_frames[0],
+                "reference_frame": {
+                    "frame_id": 0,
+                    "source_index": legacy_reference["source_index"],
+                    "path": legacy_reference["path"],
+                    "sha256": legacy_reference["sha256"],
+                },
                 "pose_jump": "hypot(relative_translation_l2, relative_rotation_angle_rad)",
                 "geometric_residual": "median_l2(T_pose(pts3d_in_self_view)-pts3d_in_other_view) / max(median_l2(pts3d_in_other_view), 1e-8)",
                 "frames": trajectory,
