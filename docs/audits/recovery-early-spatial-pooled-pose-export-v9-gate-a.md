@@ -34,7 +34,8 @@ call an export wrapper.
 | Item | Value |
 | --- | --- |
 | StateGuard3R implementation commit | 2eda68d0babeb27f9d5727e8e70ecf1935eca7d4 |
-| Gate-A tests/dispatcher commit | 872c748539102ec2a572f15d7070d874253f2f32 |
+| Gate-A tests/initial dispatcher commit | 872c748539102ec2a572f15d7070d874253f2f32 |
+| Sealed dispatcher/independent-validator commit | 2406300 |
 | ReCal3R commit | 466c7cdf3acd2f589f1d82e5f6391966f19db9ff |
 | Checkpoint SHA-256 | 45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103 |
 | ReCal3R model SHA-256 | 32785a6f29fded66aa142207b29a33d7522f0c39aa068fe2175a956ec8dbc3c1 |
@@ -53,8 +54,9 @@ The Torch-enabled targeted invocation was:
     PYTHONPATH="src:/data/wangzheng/Project2/baselines/ReCal3R/.venv/lib/python3.11/site-packages" \
     .venv/bin/python -m pytest -q [five v9 test files]
 
-Result: **22 passed in 22.80 s** (a repeat after dispatcher hardening was
-22 passed in 23.51 s). It covers:
+Result: **23 passed in 23.25 s** after the sealed dispatcher/validator
+hardening (the earlier Gate-A runs were 22 passed in 22.80 s and 23.51 s). It
+covers:
 
 - mean/projection equivalence; rejection of unprojected 1024-wide input;
   nonfinite, malformed, device, reflection, non-orthogonal, and homogeneous
@@ -85,13 +87,19 @@ invocation.
 ## New terminal-evidence owner
 
 scripts/dispatch_recal3r_early_spatial_pooled_pose_v9.py is the only permitted
-v9 GPU launcher. Before creating a child it requires fresh direct paths, clean
-StateGuard3R/ReCal3R worktrees, committed component blobs, and two GPU-2
-UUID/free-memory snapshots. It attaches pipe-pane before the driver, records
-dispatch/PID/exit in original main and live transcript files, writes
-postflight only after its result and absent-PID check, verifies NUL-free
-artifacts, and freezes every terminal artifact plus the output tree. It has no
-recovery/post-hoc postflight API.
+v9 GPU launcher and validator owner. Before creating a child it atomically
+claims an ID lease, requires fresh direct paths, clean StateGuard3R/ReCal3R
+worktrees, committed component blobs, and two GPU-2 UUID/free-memory
+snapshots. It attaches pipe-pane and observes a pipe-ready marker before
+driver dispatch, binds the driver PID to its Linux start time, drains both
+terminal streams after the driver pane exits, and writes postflight only after
+the result and absent PID/start-time pair check.
+
+It then freezes all primary artifacts and starts a fresh CPU-only interpreter
+to recompute the sealed source hashes, command hash, two preflights, ordered
+markers, pipe drain, PID/start-time absence proof, output inventory, NUL
+status, and permissions. The validator report is itself one-use and frozen.
+The launcher has no repair, postflight-only, validator-retry, or ID-reuse API.
 
 ## Exact next action and stop rules
 
