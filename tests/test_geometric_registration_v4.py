@@ -22,6 +22,12 @@ def test_fixed_ransac_recovers_proper_current_to_anchor_transform_with_outliers(
     assert result.inlier_mask.sum() == 36
 
 
+def test_refined_inlier_cloud_must_have_centered_rank_three() -> None:
+    grid = np.array([(x, y, 0.0) for x in range(5) for y in range(5)], dtype=np.float64)
+    with pytest.raises(GeometricRegistrationError, match="rank 3"):
+        register_anchor_to_current(grid, grid)
+
+
 def test_registration_fails_closed_for_insufficient_or_degenerate_pairs() -> None:
     with pytest.raises(GeometricRegistrationError, match="fewer than 24"):
         register_anchor_to_current(np.zeros((23, 3)), np.zeros((23, 3)))
