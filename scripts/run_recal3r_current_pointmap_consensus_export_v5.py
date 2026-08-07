@@ -205,6 +205,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     import numpy as np
     import torch
     from stateguard3r.current_pointmap_consensus_export_v5 import CurrentPointmapConsensusExport, PinnedConsensusPoseEncoder
+    from stateguard3r.current_pointmap_consensus_v5 import audit_pinned_cross_head
     from stateguard3r.health import adapt_recal3r_trace, write_health_jsonl_atomic
     from stateguard3r.online_detector_incremental_v3 import IncrementalOnlinePrefixDetector
     from stateguard3r.online_detector_v2 import FrozenDetectorV3Config
@@ -221,18 +222,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if str(source_root) not in sys.path:
             sys.path.insert(0, str(source_root))
     smoke._verify_preflight_inputs(args)
-    cross_head_path = args.baseline_src / "dust3r" / "heads" / "dpt_head.py"
-    cross_head_source = cross_head_path.read_bytes()
-    cross_head_audit = {
-        "path": str(cross_head_path.resolve(strict=True)),
-        "sha256": hashlib.sha256(cross_head_source).hexdigest(),
-        "camera_pose_numeric_input_to_cross_head": False,
-        "cross_head_uses_shared_pose_token_latent": True,
-        "causal_interpretation": "pointmap-head consensus only; cross pointmap is not claimed latent-independent from pose head",
-    }
-    required_cross_topology = (b"pose = self.pose_head(pose_token)", b"token_cross = blk(token_cross, pose_token", b"x_cross = x[:-1] + [token_cross]", b"self.dpt_cross", b'final_output["camera_pose"] = pose')
-    if any(fragment not in cross_head_source for fragment in required_cross_topology):
-        raise RuntimeError("pinned ReCal3R cross-head topology changed")
+    cross_head_audit = audit_pinned_cross_head(args.baseline_src / "dust3r" / "heads" / "dpt_head.py")
     views = smoke._prepare_input_views(args, torch)
     captures, capture_provenance = capture_timestamp_records([frame.path for frame in args.input_manifest_data.frames], rgb_txt=args.rgb_timestamp_listing, dataset_root=args.timestamp_dataset_root)
     sidecar = timestamp_order_sidecar(captures, provenance=capture_provenance)
@@ -272,6 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             observer = _V5Observer(
                 IncrementalOnlinePrefixDetector(FrozenDetectorV3Config.from_mapping(config_payload), captures=captures, capture_provenance=capture_provenance),
                 CurrentPointmapConsensusExport(
+                    torch=torch,
                     registered_pose_encoder=PinnedConsensusPoseEncoder(torch=torch, camera_to_pose_encoding=camera.camera_to_pose_encoding, pose_encoding_to_camera=camera.pose_encoding_to_camera),
                 ),
                 timestamps=smoke._input_timestamps(args),

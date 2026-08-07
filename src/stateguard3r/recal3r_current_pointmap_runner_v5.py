@@ -146,12 +146,14 @@ def run_current_pointmap_recurrent_lighter(
             except (OnlineQuarantineStateError, StructuralWitnessError) as error:
                 raise CurrentPointmapRunnerError(f"v5 restore failed: {error}") from error
             action, reason, restore_evidence = "quarantine_current_rollback", "current_online_detector_alarm", witness.timeline_evidence()
-        raw_prediction = to_cpu(res)
         if observer is None:
-            exported, export_evidence = raw_prediction, {"export_action": "export_real_camera_pose", "anchor_frame_ids": None}
+            exported, export_evidence = res, {"export_action": "export_real_camera_pose", "anchor_frame_ids": None}
         else:
-            exported, export_evidence = observer.finalize(observation, quarantined=quarantine, prediction=raw_prediction)
-        predictions.append(exported)
+            # Keep the complete pointmap tensors on their original device until
+            # after current-frame consensus and pose encoding.  This prevents
+            # a hidden CPU registration path and preserves the v5 mechanism.
+            exported, export_evidence = observer.finalize(observation, quarantined=quarantine, prediction=res)
+        predictions.append(to_cpu(exported))
         evidence = dict(observer.timeline_evidence(observation)) if observer is not None else {}
         timeline.append({"frame_id": i, "action": action, "reason": reason, "current_alarm": quarantine, "consecutive_rollbacks": consecutive, "pending_transaction_count": 0, "restore_witness": restore_evidence, **dict(export_evidence), **evidence})
         if synchronize is not None:
