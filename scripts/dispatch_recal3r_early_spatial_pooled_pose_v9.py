@@ -17,6 +17,7 @@ import json
 import math
 import os
 from pathlib import Path
+import secrets
 import shlex
 import signal
 import stat
@@ -76,6 +77,14 @@ RUNTIME_RATIO_LIMIT = 1.20
 
 class V9DispatchError(RuntimeError):
     """A v9 forward has no valid single-owner dispatch path."""
+
+
+class V9PreexecNoGo(V9DispatchError):
+    """The driver reaped an unreleased wrapper and emitted no child result."""
+
+    def __init__(self, failure: Mapping[str, Any]) -> None:
+        super().__init__("driver reached a pre-execution identity NO-GO")
+        self.failure = failure
 
 
 @dataclass(frozen=True)
@@ -278,6 +287,22 @@ def _acquire_lease(paths: ArtifactPaths) -> None:
         raise V9DispatchError("same-ID owner lease already exists") from error
     if _lstat_kind(paths.lease) != "directory":
         raise V9DispatchError("same-ID owner lease is not a directory")
+    _require_empty_lease(paths)
+
+
+def _lease_entry(paths: ArtifactPaths, name: str) -> Path:
+    if name not in {"child-start", "child-start.tmp", "child-go"}:
+        raise V9DispatchError("unrecognized owner-lease entry")
+    return paths.lease / name
+
+
+def _require_empty_lease(paths: ArtifactPaths) -> None:
+    """A fresh owner lease is a private protocol channel, never a cache."""
+    if _lstat_kind(paths.lease) != "directory":
+        raise V9DispatchError("same-ID owner lease is not a direct directory")
+    entries = list(paths.lease.iterdir())
+    if entries:
+        raise V9DispatchError("same-ID owner lease is not empty")
 
 
 def _component_provenance() -> Mapping[str, Any]:
@@ -475,34 +500,90 @@ def _interpreter_provenance(argv: Sequence[str], *, test: bool) -> Mapping[str, 
     return {"path": str(interpreter), "resolved_path": str(resolved), "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest()}
 
 
-def _driver(run_id: str, argv: Sequence[str], paths: ArtifactPaths, command_hash: str, quoted: str) -> str:
+def _driver(run_id: str, argv: Sequence[str], paths: ArtifactPaths, command_hash: str, quoted: str, go_token: str) -> str:
     """Generate the sole writer of ordered main/result child evidence."""
-    run_q, main_q, result_q, quoted_q, hash_q = (shlex.quote(value) for value in (run_id, str(paths.main), str(paths.result), quoted, command_hash))
+    if len(go_token) != 64 or any(character not in "0123456789abcdef" for character in go_token):
+        raise V9DispatchError("driver go token is not a 256-bit lowercase-hex value")
+    run_q, main_q, result_q, lease_q, quoted_q, hash_q, token_q = (shlex.quote(value) for value in (run_id, str(paths.main), str(paths.result), str(paths.lease), quoted, command_hash, go_token))
     command = shlex.join(argv)
     return f"""#!/usr/bin/env bash
 set +e
 run_id={run_q}
 main_log={main_q}
 result_path={result_q}
+lease_path={lease_q}
+start_path="$lease_path/child-start"
+start_tmp="$lease_path/child-start.tmp"
+go_path="$lease_path/child-go"
 command_quoted={quoted_q}
 command_sha256={hash_q}
+go_token={token_q}
 record() {{ printf '%s\\n' "$1" | tee -a "$main_log"; }}
 record "V9_DRIVER_START run_id=$run_id"
 record "V9_DRIVER_COMMAND=$command_quoted"
 record "V9_DRIVER_COMMAND_SHA256=$command_sha256"
-record "V9_DRIVER_DISPATCHED run_id=$run_id"
-# The project child owns this PID directly.  Do not use process-substitution
-# tees here: they can outlive wait "$child_pid" and mutate the main log after
-# the dispatcher has sealed its terminal evidence.
-CUDA_VISIBLE_DEVICES={GPU_INDEX} {command} >> "$main_log" 2>&1 &
+record "V9_DRIVER_DISPATCHED run_id=$run_id kind=wrapper_only"
+# The payload cannot exec until its wrapper has supplied a PID/start-time pair
+# and this driver has written the unpredictable one-use go token.  Thus a
+# missing /proc start time is a pre-exec failure, never an unidentifiable GPU
+# forward.  A mere pre-existing path cannot release the payload: its contents
+# must equal the token embedded in this frozen driver.
+(
+    gate_pid="$BASHPID"
+    gate_start_ticks="$(awk '{{print $22}}' "/proc/$gate_pid/stat" 2>/dev/null)"
+    if [[ ! "$gate_start_ticks" =~ ^[0-9]+$ ]]; then
+        printf 'FAIL %s unavailable\\n' "$gate_pid" > "$start_tmp"
+        mv "$start_tmp" "$start_path"
+        exit 72
+    fi
+    printf 'READY %s %s\\n' "$gate_pid" "$gate_start_ticks" > "$start_tmp"
+    mv "$start_tmp" "$start_path"
+    while true; do
+        if [[ -e "$go_path" || -L "$go_path" ]]; then
+            if [[ -L "$go_path" || ! -f "$go_path" ]]; then exit 73; fi
+            # The postflight evidence hashes the complete gate file, so the
+            # wrapper must accept precisely those same bytes, not merely an
+            # authorized first line followed by unrecorded suffix data.
+            if ! printf '%s\\n' "$go_token" | cmp -s - "$go_path"; then exit 73; fi
+            exec env CUDA_VISIBLE_DEVICES={GPU_INDEX} {command}
+        fi
+        sleep 0.01
+    done
+) >> "$main_log" 2>&1 &
 child_pid=$!
-child_start_ticks="$(awk '{{print $22}}' "/proc/$child_pid/stat" 2>/dev/null)"
-if [[ ! "$child_start_ticks" =~ ^[0-9]+$ ]]; then
-    record "V9_DRIVER_PID_START_UNAVAILABLE run_id=$run_id child_pid=$child_pid"
-    wait "$child_pid"; child_exit=$?
-    exit "$child_exit"
+start_deadline=$((SECONDS + 30))
+while [[ ! -f "$start_path" && $SECONDS -lt $start_deadline ]]; do
+    if ! kill -0 "$child_pid" 2>/dev/null; then break; fi
+    sleep 0.01
+done
+if [[ ! -f "$start_path" ]]; then
+    kill "$child_pid" 2>/dev/null; wait "$child_pid"; child_exit=$?
+    record "V9_DRIVER_PREEXEC_IDENTITY_FAILURE run_id=$run_id child_pid=$child_pid reason=start_gate_missing exit_code=$child_exit"
+    exit 70
 fi
-record "V9_DRIVER_CHILD_PID run_id=$run_id child_pid=$child_pid child_start_ticks=$child_start_ticks"
+read -r start_kind reported_pid child_start_ticks < "$start_path"
+if [[ "$start_kind" != READY || "$reported_pid" != "$child_pid" || ! "$child_start_ticks" =~ ^[0-9]+$ ]]; then
+    wait "$child_pid"; child_exit=$?
+    record "V9_DRIVER_PREEXEC_IDENTITY_FAILURE run_id=$run_id child_pid=$child_pid reason=start_time_unavailable exit_code=$child_exit"
+    exit 70
+fi
+driver_start_ticks="$(awk '{{print $22}}' "/proc/$child_pid/stat" 2>/dev/null)"
+if [[ "$driver_start_ticks" != "$child_start_ticks" ]]; then
+    kill "$child_pid" 2>/dev/null; wait "$child_pid"; child_exit=$?
+    record "V9_DRIVER_PREEXEC_IDENTITY_FAILURE run_id=$run_id child_pid=$child_pid reason=parent_start_time_mismatch exit_code=$child_exit"
+    exit 70
+fi
+if ! record "V9_DRIVER_CHILD_PID run_id=$run_id child_pid=$child_pid child_start_ticks=$child_start_ticks"; then
+    kill "$child_pid" 2>/dev/null; wait "$child_pid"
+    exit 70
+fi
+record "V9_DRIVER_PAYLOAD_RELEASE_ARMED run_id=$run_id child_pid=$child_pid child_start_ticks=$child_start_ticks"
+if ! (set -o noclobber; printf '%s\\n' "$go_token" > "$go_path") 2>/dev/null; then
+    kill "$child_pid" 2>/dev/null; wait "$child_pid"; child_exit=$?
+    record "V9_DRIVER_PREEXEC_IDENTITY_FAILURE run_id=$run_id child_pid=$child_pid reason=go_gate_create_failed exit_code=$child_exit"
+    exit 70
+fi
+record "V9_DRIVER_PAYLOAD_RELEASED run_id=$run_id child_pid=$child_pid child_start_ticks=$child_start_ticks"
 wait "$child_pid"; child_exit=$?
 reaped_at="$(date --iso-8601=seconds)"
 record "V9_DRIVER_EXIT run_id=$run_id child_pid=$child_pid child_start_ticks=$child_start_ticks exit_code=$child_exit reaped_at=$reaped_at"
@@ -601,9 +682,13 @@ def _parse_result(path: Path, *, run_id: str, command_hash: str, quoted: str) ->
     return payload
 
 
-def _wait_for_result(path: Path, *, run_id: str, command_hash: str, quoted: str, deadline: float) -> Mapping[str, Any]:
+def _wait_for_result(path: Path, *, run_id: str, command_hash: str, quoted: str, deadline: float, preexec_main: Path | None = None) -> Mapping[str, Any]:
     last_error: Exception | None = None
     while time.monotonic() < deadline:
+        if preexec_main is not None:
+            failure = _preexec_identity_failure(preexec_main, run_id=run_id)
+            if failure is not None:
+                raise V9PreexecNoGo(failure)
         if _lexists(path):
             try:
                 return _parse_result(path, run_id=run_id, command_hash=command_hash, quoted=quoted)
@@ -626,6 +711,68 @@ def _partial_child_identity(main: Path, *, run_id: str) -> tuple[int, str] | Non
             if pid_text.isdigit() and start.isdigit():
                 return int(pid_text), start
     return None
+
+
+def _preexec_identity_failure(main: Path, *, run_id: str) -> Mapping[str, Any] | None:
+    """Parse the driver's only legitimate no-result terminal marker.
+
+    This marker is emitted only after ``wait`` has reaped the wrapper.  It is
+    intentionally not a driver result: the payload never received a valid go
+    token, so a result object would falsely claim that a model invocation had
+    occurred.
+    """
+    try:
+        text = _read_regular_nul_free(main, label="main log").decode("utf-8", errors="strict")
+    except (UnicodeDecodeError, V9DispatchError):
+        return None
+    prefix = f"V9_DRIVER_PREEXEC_IDENTITY_FAILURE run_id={run_id} "
+    lines = [line for line in text.splitlines() if line.startswith(prefix)]
+    if not lines:
+        return None
+    if len(lines) != 1:
+        raise V9DispatchError("pre-exec identity failure marker is ambiguous")
+    parts = lines[0].split()
+    if len(parts) != 5:
+        raise V9DispatchError("pre-exec identity failure marker is malformed")
+    fields: dict[str, str] = {}
+    for part in parts[1:]:
+        if "=" not in part:
+            raise V9DispatchError("pre-exec identity failure marker is malformed")
+        key, value = part.split("=", 1)
+        if key in fields:
+            raise V9DispatchError("pre-exec identity failure marker is malformed")
+        fields[key] = value
+    if (
+        fields.get("run_id") != run_id
+        or not fields.get("child_pid", "").isdigit()
+        or int(fields["child_pid"]) <= 0
+        or fields.get("reason") not in {
+            "start_gate_missing", "start_time_unavailable", "parent_start_time_mismatch", "go_gate_create_failed",
+        }
+        or not fields.get("exit_code", "").isdigit()
+    ):
+        raise V9DispatchError("pre-exec identity failure marker is malformed")
+    forbidden = [
+        f"V9_DRIVER_PAYLOAD_RELEASED run_id={run_id} ",
+        f"V9_DRIVER_EXIT run_id={run_id} ",
+        f"V9_DRIVER_RESULT_WRITTEN run_id={run_id} ",
+    ]
+    # A failed exclusive write can occur after identity logging and arming but
+    # before the random token exists.  It remains a no-go only if postflight
+    # proves that the on-disk gate hash is *not* the authorized token.
+    if fields["reason"] != "go_gate_create_failed":
+        forbidden.extend((
+            f"V9_DRIVER_CHILD_PID run_id={run_id} ",
+            f"V9_DRIVER_PAYLOAD_RELEASE_ARMED run_id={run_id} ",
+        ))
+    if any(marker in text for marker in forbidden):
+        raise V9DispatchError("pre-exec identity failure follows a possible payload release")
+    return {
+        "run_id": run_id,
+        "child_pid": int(fields["child_pid"]),
+        "reason": fields["reason"],
+        "exit_code": int(fields["exit_code"]),
+    }
 
 
 def _terminate_owned_child(identity: tuple[int, str], *, grace_seconds: float = 5.0) -> None:
@@ -658,7 +805,7 @@ def _ordered_stream(data: bytes, *, run_id: str, quoted: str, command_hash: str,
         f"V9_DRIVER_START run_id={run_id}",
         f"V9_DRIVER_COMMAND={quoted}",
         f"V9_DRIVER_COMMAND_SHA256={command_hash}",
-        f"V9_DRIVER_DISPATCHED run_id={run_id}",
+        f"V9_DRIVER_DISPATCHED run_id={run_id} kind=wrapper_only",
         f"V9_DRIVER_CHILD_PID run_id={run_id} child_pid={result['child_pid']} child_start_ticks={result['child_start_ticks']}",
         f"V9_DRIVER_EXIT run_id={run_id} child_pid={result['child_pid']} child_start_ticks={result['child_start_ticks']} exit_code={result['exit_code']} reaped_at={result['reaped_at']}",
         f"V9_DRIVER_RESULT_WRITTEN run_id={run_id} child_pid={result['child_pid']} child_start_ticks={result['child_start_ticks']} exit_code={result['exit_code']}",
@@ -673,27 +820,117 @@ def _ordered_stream(data: bytes, *, run_id: str, quoted: str, command_hash: str,
             raise V9DispatchError("tmux pipe-ready marker is missing or late")
 
 
+def _ordered_preexec_stream(data: bytes, *, run_id: str, quoted: str, command_hash: str, failure: Mapping[str, Any], transcript: bool, ready_start_ticks: str | None = None) -> None:
+    """Require the complete, distinctly no-payload terminal stream."""
+    text = data.decode("utf-8", errors="strict")
+    markers = [
+        f"V9_DRIVER_START run_id={run_id}",
+        f"V9_DRIVER_COMMAND={quoted}",
+        f"V9_DRIVER_COMMAND_SHA256={command_hash}",
+        f"V9_DRIVER_DISPATCHED run_id={run_id} kind=wrapper_only",
+    ]
+    if failure["reason"] == "go_gate_create_failed":
+        if ready_start_ticks is None or not ready_start_ticks.isdigit():
+            raise V9DispatchError("go-gate pre-exec terminal lacks its READY start-time binding")
+        markers.extend((
+            f"V9_DRIVER_CHILD_PID run_id={run_id} child_pid={failure['child_pid']} child_start_ticks={ready_start_ticks}",
+            f"V9_DRIVER_PAYLOAD_RELEASE_ARMED run_id={run_id} child_pid={failure['child_pid']} child_start_ticks={ready_start_ticks}",
+        ))
+    markers.append(f"V9_DRIVER_PREEXEC_IDENTITY_FAILURE run_id={run_id} child_pid={failure['child_pid']} reason={failure['reason']} exit_code={failure['exit_code']}")
+    offsets = [text.find(marker) for marker in markers]
+    if any(offset < 0 for offset in offsets) or offsets != sorted(offsets) or any(text.count(marker) != 1 for marker in markers):
+        raise V9DispatchError("pre-exec terminal marker sequence is missing, duplicated, or ill ordered")
+    forbidden = [
+        f"V9_DRIVER_PAYLOAD_RELEASED run_id={run_id} ",
+        f"V9_DRIVER_EXIT run_id={run_id} ",
+        f"V9_DRIVER_RESULT_WRITTEN run_id={run_id} ",
+    ]
+    if failure["reason"] != "go_gate_create_failed":
+        forbidden.extend((
+            f"V9_DRIVER_CHILD_PID run_id={run_id} ",
+            f"V9_DRIVER_PAYLOAD_RELEASE_ARMED run_id={run_id} ",
+        ))
+    if any(marker in text for marker in forbidden):
+        raise V9DispatchError("pre-exec terminal stream contains a payload-capable marker")
+    if transcript:
+        ready = f"V9_PIPE_READY run_id={run_id}"
+        ready_at = text.find(ready)
+        if text.count(ready) != 1 or ready_at < 0 or ready_at > offsets[0]:
+            raise V9DispatchError("pre-exec tmux pipe-ready marker is missing or late")
+
+
 def _artifact_digest(path: Path) -> str:
     return hashlib.sha256(_read_regular_nul_free(path, label="terminal artifact")).hexdigest()
 
 
-def _postflight_payload(paths: ArtifactPaths, *, run_id: str, result: Mapping[str, Any] | None, source: Mapping[str, Any] | None, pipe: Mapping[str, Any] | None, error: str | None) -> Mapping[str, Any]:
+def _lease_entry_evidence(paths: ArtifactPaths, name: str) -> Mapping[str, Any]:
+    path = _lease_entry(paths, name)
+    kind = _lstat_kind(path)
+    evidence: dict[str, Any] = {"path": name, "kind": kind}
+    if kind == "regular":
+        data = path.read_bytes()
+        evidence.update({"size_bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(), "nul_free": b"\0" not in data})
+        if b"\0" not in data and len(data) <= 4096:
+            try:
+                evidence["utf8_text"] = data.decode("utf-8", errors="strict")
+            except UnicodeDecodeError:
+                evidence["utf8_text"] = None
+    return evidence
+
+
+def _preexec_ready_start_ticks(paths: ArtifactPaths, failure: Mapping[str, Any]) -> str | None:
+    """Return the exact READY handoff only for the post-identity go failure."""
+    if failure["reason"] != "go_gate_create_failed":
+        return None
+    text = _read_regular_nul_free(_lease_entry(paths, "child-start"), label="pre-exec start gate").decode("utf-8", errors="strict")
+    fields = text.split()
+    if len(fields) != 3 or fields[0] != "READY" or fields[1] != str(failure["child_pid"]) or not fields[2].isdigit() or text != f"READY {failure['child_pid']} {fields[2]}\n":
+        raise V9DispatchError("go-gate pre-exec terminal lacks its exact READY start gate")
+    return fields[2]
+
+
+def _preexec_no_go_evidence(paths: ArtifactPaths, failure: Mapping[str, Any], *, go_token_sha256: str) -> Mapping[str, Any]:
+    """Record the immutable boundary that makes a no-result failure safe."""
+    go = _lease_entry_evidence(paths, "child-go")
+    go_is_authorized = go.get("kind") == "regular" and go.get("sha256") == go_token_sha256
+    return {
+        "terminal_kind": "PREEXEC_IDENTITY_NO_GO",
+        "payload_not_executed": True,
+        "wrapper_reaped": True,
+        "failure": dict(failure),
+        "driver_result_exists": _lexists(paths.result),
+        "output_kind": _lstat_kind(paths.output),
+        "go_gate": go,
+        "go_token_sha256": go_token_sha256,
+        "go_gate_authorized": go_is_authorized,
+        "start_gate": _lease_entry_evidence(paths, "child-start"),
+    }
+
+
+def _postflight_payload(paths: ArtifactPaths, *, run_id: str, result: Mapping[str, Any] | None, source: Mapping[str, Any] | None, pipe: Mapping[str, Any] | None, error: str | None, preexec_failure: Mapping[str, Any] | None = None, go_token_sha256: str | None = None) -> Mapping[str, Any]:
     payload: dict[str, Any] = {
-        "schema_version": "stateguard3r.v9-postflight.v2",
+        "schema_version": "stateguard3r.v9-postflight.v3",
         "run_id": run_id,
         "finished_at": datetime.now().astimezone().isoformat(),
         "source_provenance": source,
         "pipe_close_and_drain": pipe,
         "error": error,
         "result": result,
+        "preexec_no_go": None,
         "output_exists": _lstat_kind(paths.output) != "missing",
     }
     if result is not None:
         payload["pid_start_time_check"] = _pid_pair_absent(result)
-        try:
-            payload["gpu_postflight"] = _snapshot(require_minimum=False)
-        except Exception as snapshot_error:  # Preserve a complete failure record.
-            payload["gpu_postflight_error"] = str(snapshot_error)
+    if preexec_failure is not None:
+        if go_token_sha256 is None:
+            raise V9DispatchError("pre-exec postflight lacks its go-token digest")
+        payload["preexec_no_go"] = _preexec_no_go_evidence(paths, preexec_failure, go_token_sha256=go_token_sha256)
+    try:
+        # A pre-exec NO-GO ran no model forward, so it records GPU state but
+        # never demands the 12-GiB admission threshold of a real launch.
+        payload["gpu_postflight"] = _snapshot(require_minimum=False)
+    except Exception as snapshot_error:  # Preserve a complete failure record.
+        payload["gpu_postflight_error"] = str(snapshot_error)
     return payload
 
 
@@ -783,12 +1020,79 @@ def _validate_dynamic_always_control(paths: ArtifactPaths) -> Mapping[str, Any]:
     }
 
 
+def _validate_frozen_driver(paths: ArtifactPaths, *, run_id: str, argv: Sequence[str], command_hash: str, quoted: str) -> str:
+    """Bind the generated token-gated driver byte-for-byte to this dispatcher."""
+    text = _read_regular_nul_free(paths.driver, label="frozen driver").decode("utf-8", errors="strict")
+    lines = [line for line in text.splitlines() if line.startswith("go_token=")]
+    if len(lines) != 1:
+        raise V9DispatchError("frozen driver does not contain exactly one go token")
+    token = lines[0].split("=", 1)[1]
+    if len(token) != 64 or any(character not in "0123456789abcdef" for character in token):
+        raise V9DispatchError("frozen driver go token is malformed")
+    if text != _driver(run_id, argv, paths, command_hash, quoted, token):
+        raise V9DispatchError("frozen driver differs from the pinned token-gated template")
+    return hashlib.sha256((token + "\n").encode("ascii")).hexdigest()
+
+
+def _validate_preexec_no_go(paths: ArtifactPaths, *, run_id: str, command_hash: str, quoted: str, postflight: Mapping[str, Any], driver_token_sha256: str) -> Mapping[str, Any]:
+    """Validate the deliberately no-result pre-execution terminal state."""
+    main_failure = _preexec_identity_failure(paths.main, run_id=run_id)
+    transcript_failure = _preexec_identity_failure(paths.transcript, run_id=run_id)
+    if main_failure is None or transcript_failure != main_failure:
+        raise V9DispatchError("sealed pre-exec failure is absent or differs between terminal streams")
+    ready_start_ticks = _preexec_ready_start_ticks(paths, main_failure)
+    _ordered_preexec_stream(_read_regular_nul_free(paths.main, label="main"), run_id=run_id, quoted=quoted, command_hash=command_hash, failure=main_failure, transcript=False, ready_start_ticks=ready_start_ticks)
+    _ordered_preexec_stream(_read_regular_nul_free(paths.transcript, label="transcript"), run_id=run_id, quoted=quoted, command_hash=command_hash, failure=main_failure, transcript=True, ready_start_ticks=ready_start_ticks)
+    if _lexists(paths.result) or _lstat_kind(paths.output) != "missing":
+        raise V9DispatchError("sealed pre-exec no-go unexpectedly contains a result or output")
+    if postflight.get("schema_version") != "stateguard3r.v9-postflight.v3" or postflight.get("result") is not None or postflight.get("error") != "PREEXEC_IDENTITY_NO_GO":
+        raise V9DispatchError("sealed pre-exec postflight schema is invalid")
+    no_go = postflight.get("preexec_no_go")
+    if not isinstance(no_go, Mapping):
+        raise V9DispatchError("sealed pre-exec postflight lacks no-go evidence")
+    if (
+        no_go.get("terminal_kind") != "PREEXEC_IDENTITY_NO_GO"
+        or no_go.get("payload_not_executed") is not True
+        or no_go.get("wrapper_reaped") is not True
+        or no_go.get("failure") != main_failure
+        or no_go.get("driver_result_exists") is not False
+        or no_go.get("output_kind") != "missing"
+        or no_go.get("go_gate_authorized") is not False
+        or no_go.get("go_token_sha256") != driver_token_sha256
+    ):
+        raise V9DispatchError("sealed pre-exec no-go boundary does not recompute")
+    go = no_go.get("go_gate")
+    if not isinstance(go, Mapping) or go.get("path") != "child-go":
+        raise V9DispatchError("sealed pre-exec go-gate evidence is malformed")
+    if go.get("kind") == "regular" and go.get("sha256") == no_go["go_token_sha256"]:
+        raise V9DispatchError("sealed pre-exec gate contains the authorized token")
+    start_gate = no_go.get("start_gate")
+    if not isinstance(start_gate, Mapping) or start_gate.get("path") != "child-start":
+        raise V9DispatchError("sealed pre-exec start-gate evidence is malformed")
+    reason = main_failure["reason"]
+    if reason == "start_gate_missing" and start_gate.get("kind") != "missing":
+        raise V9DispatchError("sealed missing-start pre-exec terminal has a start gate")
+    if reason == "start_time_unavailable" and start_gate.get("utf8_text") != f"FAIL {main_failure['child_pid']} unavailable\n":
+        raise V9DispatchError("sealed unavailable-start pre-exec terminal lacks its exact FAIL gate")
+    if reason in {"parent_start_time_mismatch", "go_gate_create_failed"}:
+        text = start_gate.get("utf8_text")
+        prefix = f"READY {main_failure['child_pid']} "
+        if not isinstance(text, str) or not text.startswith(prefix) or not text.endswith("\n") or not text[len(prefix):-1].isdigit():
+            raise V9DispatchError("sealed READY-start pre-exec terminal lacks its exact READY gate")
+    if not postflight.get("pipe_close_and_drain", {}).get("drained"):
+        raise V9DispatchError("sealed pre-exec postflight lacks pipe drain")
+    if "gpu_postflight_error" in postflight:
+        raise V9DispatchError("sealed pre-exec postflight lacks a GPU snapshot")
+    _validate_snapshot(postflight.get("gpu_postflight", {}), require_minimum=False)
+    return {"status": "PREEXEC_IDENTITY_NO_GO_EVIDENCE_COMPLETE", "failure": main_failure, "payload_not_executed": True}
+
+
 def _validator_report(paths: ArtifactPaths, *, run_id: str) -> Mapping[str, Any]:
     """Independently recompute the sealed evidence without any CUDA API call."""
     report: dict[str, Any] = {"schema_version": "stateguard3r.v9-validator.v1", "run_id": run_id, "started_at": datetime.now().astimezone().isoformat(), "cpu_only": True}
     error: str | None = None
     try:
-        primary = (paths.preflight, paths.main, paths.postflight, paths.transcript, paths.driver, paths.result)
+        primary = (paths.preflight, paths.main, paths.postflight, paths.transcript, paths.driver)
         for path in primary:
             if _lstat_kind(path) != "regular" or stat.S_IMODE(path.stat().st_mode) != 0o444:
                 raise V9DispatchError(f"sealed primary artifact mode/path invalid: {path}")
@@ -812,6 +1116,19 @@ def _validator_report(paths: ArtifactPaths, *, run_id: str) -> Mapping[str, Any]
         recorded_interpreter = preflight.get("interpreter")
         if recorded_interpreter != _interpreter_provenance(argv, test=test_child):
             raise V9DispatchError("sealed production interpreter provenance does not recompute")
+        driver_token_sha256 = _validate_frozen_driver(paths, run_id=run_id, argv=argv, command_hash=command_hash, quoted=quoted)
+        current_source = _component_provenance()
+        if preflight.get("source_provenance") != current_source or postflight.get("source_provenance") != current_source:
+            raise V9DispatchError("sealed source provenance does not recompute")
+        if not _lexists(paths.result):
+            report.update(_validate_preexec_no_go(paths, run_id=run_id, command_hash=command_hash, quoted=quoted, postflight=postflight, driver_token_sha256=driver_token_sha256))
+            report.update({"command_sha256": command_hash, "artifact_sha256": {path.name: _artifact_digest(path) for path in primary}})
+            raise StopIteration
+        if _lstat_kind(paths.result) != "regular" or stat.S_IMODE(paths.result.stat().st_mode) != 0o444:
+            raise V9DispatchError("sealed driver result mode/path invalid")
+        _read_regular_nul_free(paths.result, label="sealed driver result")
+        if postflight.get("schema_version") != "stateguard3r.v9-postflight.v3":
+            raise V9DispatchError("sealed postflight schema is invalid")
         result = _parse_result(paths.result, run_id=run_id, command_hash=command_hash, quoted=quoted)
         _ordered_stream(_read_regular_nul_free(paths.main, label="main"), run_id=run_id, quoted=quoted, command_hash=command_hash, result=result, transcript=False)
         _ordered_stream(_read_regular_nul_free(paths.transcript, label="transcript"), run_id=run_id, quoted=quoted, command_hash=command_hash, result=result, transcript=True)
@@ -823,9 +1140,6 @@ def _validator_report(paths: ArtifactPaths, *, run_id: str) -> Mapping[str, Any]
         pid_check = postflight.get("pid_start_time_check")
         if not isinstance(pid_check, Mapping) or pid_check.get("expected_start_ticks") != result["child_start_ticks"] or pid_check.get("pair_absent") is not True or pid_check.get("pid_reused") is not False:
             raise V9DispatchError("sealed postflight lacks PID/start-time absence proof")
-        current_source = _component_provenance()
-        if preflight.get("source_provenance") != current_source or postflight.get("source_provenance") != current_source:
-            raise V9DispatchError("sealed source provenance does not recompute")
         if result["exit_code"] == 0:
             if _lstat_kind(paths.output) != "directory":
                 raise V9DispatchError("successful child lacks direct output")
@@ -837,7 +1151,9 @@ def _validator_report(paths: ArtifactPaths, *, run_id: str) -> Mapping[str, Any]
             terminal_status = "PASS"
         else:
             terminal_status = "CHILD_NONZERO_EVIDENCE_COMPLETE"
-        report.update({"status": terminal_status, "command_sha256": command_hash, "artifact_sha256": {path.name: _artifact_digest(path) for path in primary}})
+        report.update({"status": terminal_status, "command_sha256": command_hash, "artifact_sha256": {path.name: _artifact_digest(path) for path in (*primary, paths.result)}})
+    except StopIteration:
+        pass
     except Exception as validation_error:
         error = str(validation_error)
         report.update({"status": "FAIL", "error": error})
@@ -880,6 +1196,7 @@ def dispatch(run_id: str, argv: Sequence[str], *, timeout_seconds: float, allow_
     paths = artifact_paths(run_id)
     _canonical_paths(paths)
     _acquire_lease(paths)
+    _require_empty_lease(paths)
     _fresh_after_lease = [name for name, path in asdict(paths).items() if name != "lease" and _lexists(path)]
     if _fresh_after_lease:
         raise V9DispatchError(f"same-ID lease acquired but owner artifacts already exist: {_fresh_after_lease}")
@@ -889,6 +1206,9 @@ def dispatch(run_id: str, argv: Sequence[str], *, timeout_seconds: float, allow_
     pane: str | None = None
     result: Mapping[str, Any] | None = None
     pipe: Mapping[str, Any] | None = None
+    preexec_failure: Mapping[str, Any] | None = None
+    go_token = secrets.token_hex(32)
+    go_token_sha256 = hashlib.sha256((go_token + "\n").encode("ascii")).hexdigest()
     error: Exception | None = None
     try:
         source = _component_provenance()
@@ -901,7 +1221,7 @@ def dispatch(run_id: str, argv: Sequence[str], *, timeout_seconds: float, allow_
         _freeze(paths.preflight)
         _write(paths.main, "")
         _write(paths.transcript, "")
-        _write(paths.driver, _driver(run_id, child, paths, command_hash, quoted), 0o555)
+        _write(paths.driver, _driver(run_id, child, paths, command_hash, quoted, go_token), 0o555)
         pane = _pane()
         deadline = time.monotonic() + timeout_seconds
         _tmux(["pipe-pane", "-o", "-t", pane, f"cat >> {shlex.quote(str(paths.transcript))}"])
@@ -910,7 +1230,44 @@ def dispatch(run_id: str, argv: Sequence[str], *, timeout_seconds: float, allow_
         _wait_for_text(paths.transcript, ready, deadline)
         _tmux(["send-keys", "-t", pane, f"bash {shlex.quote(str(paths.driver))}; exit", "C-m"])
         try:
-            result = _wait_for_result(paths.result, run_id=run_id, command_hash=command_hash, quoted=quoted, deadline=deadline)
+            result = _wait_for_result(paths.result, run_id=run_id, command_hash=command_hash, quoted=quoted, deadline=deadline, preexec_main=paths.main)
+        except V9PreexecNoGo as preexec_event:
+            preexec_failure = preexec_event.failure
+            # The exact marker is written only after bash has waited for its
+            # wrapper.  Close the pane and drain both original streams
+            # immediately; there is no result because no payload was released,
+            # not because a result writer merely timed out.
+            _wait_for_driver_exit(pane, time.monotonic() + 10.0)
+            pipe = _close_pipe_and_drain(pane, paths.transcript, paths.main)
+            transcript_failure = _preexec_identity_failure(paths.transcript, run_id=run_id)
+            if transcript_failure != preexec_failure:
+                raise V9DispatchError("pre-exec identity failure is not identically recorded in both terminal streams") from preexec_event
+            ready_start_ticks = _preexec_ready_start_ticks(paths, preexec_failure)
+            _ordered_preexec_stream(_read_regular_nul_free(paths.main, label="main"), run_id=run_id, quoted=quoted, command_hash=command_hash, failure=preexec_failure, transcript=False, ready_start_ticks=ready_start_ticks)
+            _ordered_preexec_stream(_read_regular_nul_free(paths.transcript, label="transcript"), run_id=run_id, quoted=quoted, command_hash=command_hash, failure=preexec_failure, transcript=True, ready_start_ticks=ready_start_ticks)
+            if _lexists(paths.result) or _lstat_kind(paths.output) != "missing":
+                raise V9DispatchError("pre-exec identity failure unexpectedly has a result or output") from preexec_event
+            post_source = _component_provenance()
+            if post_source != source:
+                raise V9DispatchError("source/worktree drifted during pre-exec identity gate") from preexec_event
+            postflight = dict(_postflight_payload(
+                paths, run_id=run_id, result=None, source=post_source, pipe=pipe,
+                error="PREEXEC_IDENTITY_NO_GO", preexec_failure=preexec_failure,
+                go_token_sha256=go_token_sha256,
+            ))
+            no_go = postflight["preexec_no_go"]
+            if (
+                not isinstance(no_go, Mapping)
+                or no_go.get("go_gate_authorized") is not False
+                or no_go.get("driver_result_exists") is not False
+                or no_go.get("output_kind") != "missing"
+            ):
+                raise V9DispatchError("pre-exec identity failure cannot prove that the payload go gate stayed closed") from preexec_event
+            if "gpu_postflight_error" in postflight:
+                raise V9DispatchError("pre-exec identity failure lacks a GPU postflight snapshot") from preexec_event
+            _validate_snapshot(postflight.get("gpu_postflight", {}), require_minimum=False)
+            _write_json(paths.postflight, postflight)
+            raise V9DispatchError("driver terminated before payload release because its PID/start-time identity could not be established") from preexec_event
         except V9DispatchError as timeout_error:
             identity = _partial_child_identity(paths.main, run_id=run_id)
             if identity is None:
@@ -949,7 +1306,10 @@ def dispatch(run_id: str, argv: Sequence[str], *, timeout_seconds: float, allow_
                 pipe = {"drained": False, "close_error": str(pipe_error)}
         if _lexists(paths.preflight) and not _lexists(paths.postflight):
             try:
-                postflight = dict(_postflight_payload(paths, run_id=run_id, result=result, source=source, pipe=pipe, error=str(caught)))
+                postflight = dict(_postflight_payload(
+                    paths, run_id=run_id, result=result, source=source, pipe=pipe, error=str(caught),
+                    preexec_failure=preexec_failure, go_token_sha256=go_token_sha256 if preexec_failure is not None else None,
+                ))
                 if result is not None and result.get("exit_code") == 0 and _lstat_kind(paths.output) == "directory":
                     try:
                         postflight["output_inventory"] = _freeze_output(paths.output)
@@ -977,7 +1337,9 @@ def dispatch(run_id: str, argv: Sequence[str], *, timeout_seconds: float, allow_
     else:
         # A nonzero child or protocol failure is still independently audited
         # when all primary artifacts are complete enough to do so.
-        if all(_lexists(path) for path in (paths.preflight, paths.main, paths.postflight, paths.transcript, paths.driver, paths.result)):
+        normal_primary = (paths.preflight, paths.main, paths.postflight, paths.transcript, paths.driver, paths.result)
+        preexec_primary = (paths.preflight, paths.main, paths.postflight, paths.transcript, paths.driver)
+        if all(_lexists(path) for path in normal_primary) or (preexec_failure is not None and all(_lexists(path) for path in preexec_primary)):
             try:
                 _run_independent_validator(run_id)
             except Exception:
