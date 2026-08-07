@@ -109,6 +109,11 @@ def _component_provenance() -> list[dict[str, str]]:
     return result
 
 
+def _validate_new_output_dir(requested: Path) -> None:
+    if requested.exists() or requested.parent != ROOT / "outputs":
+        raise RuntimeError("v8 early-decoder pose output must be a new direct outputs child")
+
+
 def _pinned_pose_head_interface(model: Any, dpt_head_module: Any) -> tuple[Any, Any]:
     """Fail closed unless the loaded model exposes the audited official head."""
     expected = getattr(dpt_head_module, "DPTPts3dPose", None)
@@ -238,8 +243,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     runner_provenance = _self_provenance()
     component_provenance = _component_provenance()
     requested = args.output_dir.resolve(strict=False)
-    if requested.exists() or requested.parent != ROOT / "outputs":
-        raise RuntimeError("v8 early-decoder pose output must be a new direct outputs child")
+    _validate_new_output_dir(requested)
     config_payload, config_artifact = v2._frozen_json(args.detector_config, label="frozen Detector-v3 config")
     sys.path.insert(0, str(ROOT / "src"))
     import numpy as np
