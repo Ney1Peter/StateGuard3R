@@ -1855,6 +1855,25 @@ launched or created.
 - Audit: [recovery-online-quarantine-development-v2-result.md](../audits/recovery-online-quarantine-development-v2-result.md).
   No v2 blind-test acquisition/commitment is authorized.
 
+### RECOVERY-SAFE-ANCHOR-EXPORT-DEVELOPMENT-V3-0001: causal SE(3) output recovery
+
+- Status: **completed — `SAFE_ANCHOR_EXPORT_DEVELOPMENT_V3_FEASIBILITY_NO_GO`**.
+- Scope: the same three disclosed development manifests only; no download, ReCal3R modification, formal-response
+  rerun or blind acquisition.
+- Candidate: Detector-v3 current-frame rollback plus a fixed external SE(3) constant-velocity export fallback. Every
+  dynamic/wrong/low candidate quarantined frames 15--20; each action has a structural restore witness and causal
+  safe-anchor inputs, while model/detector history remains free of fallback poses.
+- Gate A/B: all three v3 always controls are byte-identical to frozen baselines for the protected four artifacts;
+  candidate/baseline runtime ratios are 1.1051, 1.0917 and 1.1306 (median 1.1051). CPU reference replay matched every
+  incremental detector decision in all 90 frozen ledger rows.
+- Frozen CPU evaluation: `outputs/recovery-safe-anchor-v3-evaluation-0001/evaluation.json`, SHA-256
+  `6379563dcbb1959f5ec63cf6c7fd7d7626fbcffaf31fbd1db45f06538b6b8e45`.
+- Decision facts: only low improves both metrics (+91.4097% ATE, +92.3408% translation RPE); dynamic and wrong are
+  negative, so median ATE/RPE effects are -10.1576%/-20.9873%, below the +5% requirements.
+- Audit: [recovery-safe-anchor-export-development-v3-result.md](../audits/recovery-safe-anchor-export-development-v3-result.md).
+  No v3 blind-test acquisition/commitment is authorized; a follow-up may not select another pose fallback from these
+  disclosed numbers.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
