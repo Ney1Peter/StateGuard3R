@@ -284,7 +284,7 @@ def _component_provenance() -> Mapping[str, Any]:
     """Bind this launcher and every v9 scientific component to HEAD bytes."""
     try:
         dirty = subprocess.run(
-            ["git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=no"],
+            ["git", "-C", str(ROOT), "status", "--porcelain"],
             check=True, text=True, capture_output=True,
         ).stdout
         if dirty.strip():
@@ -306,7 +306,7 @@ def _component_provenance() -> Mapping[str, Any]:
             components[str(relative)] = digest
         baseline = ROOT.parent / "baselines" / "ReCal3R"
         baseline_dirty = subprocess.run(
-            ["git", "-C", str(baseline), "status", "--porcelain", "--untracked-files=no"],
+            ["git", "-C", str(baseline), "status", "--porcelain"],
             check=True, text=True, capture_output=True,
         ).stdout
         if baseline_dirty.strip():
