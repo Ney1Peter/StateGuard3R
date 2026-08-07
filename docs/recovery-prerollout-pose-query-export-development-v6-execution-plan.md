@@ -1,7 +1,7 @@
 # Recovery pre-rollout pose-query export development v6：冻结 latent pose prior 计划
 
 - 制定日期：2026-08-07
-- 状态：**预注册，尚未实现/运行**
+- 状态：**已完成，`PRE_ROLLOUT_POSE_QUERY_EXPORT_V6_PROVENANCE_NO_GO`；不得继续 v6 candidate、wrong/low 或 GT quality 路径**
 - 长时目标：在 12--18 小时内，以所有预注册 Gate 的正常终态为止；不因单次好看数值、时间或日志不便提前宣布可行。
 - 唯一目标：检验 `detector-v3-incremental-prerollout-pose-query-export` 能否在不下载数据、只使用既有三个 development manifests 的条件下，同时满足 rollback/因果安全、正常路径逐字节等价、`<=1.20` runtime 和冻结跨条件质量门；任一硬门失败即诚实发布 v6 NO-GO。
 
@@ -105,3 +105,16 @@ prefix 0--14 Sim(3)、tail 19--29 ATE/RPE 计算 `(baseline-candidate)/baseline`
 
 全部满足才写未执行的 blind acquisition plan，结论为 `PRE_ROLLOUT_POSE_QUERY_EXPORT_V6_CANDIDATE_READY`；否则为
 `PRE_ROLLOUT_POSE_QUERY_EXPORT_V6_FEASIBILITY_NO_GO`。两种均完成本计划，且 NO-GO 不授权在已解盲 matrix 继续调参。
+
+## 8. 执行终态
+
+Gate A 已通过。dynamic always-control
+`recovery-prerollout-pose-query-v6-dynamic-always-commit-0001` 的四个 protected files 与 frozen v1
+baseline 逐字节一致，runtime ratio 为 `1.140228...`，也通过 `<=1.20`。但本计划第 4 节要求冻结
+canonical `preflight/main/postflight/tmux` 四类日志；实际 launcher 仅生成前三者，虽定义了
+`*-tmux-transcript.log` 变量却没有写入该文件，随后对应 tmux window 已消失，不能诚实地补造 transcript。
+
+因此 control 没有完整达到本计划的 provenance/freeze 边界，v6 在 Gate B 以前终止为
+`PRE_ROLLOUT_POSE_QUERY_EXPORT_V6_PROVENANCE_NO_GO`。不得基于该 control 启动 v6 candidate，也不得运行
+wrong/low、读取 development GT、运行 evaluator、修改同一 v6 mechanism 后重跑。完整审计见
+`docs/audits/recovery-prerollout-pose-query-export-v6-control-provenance-no-go.md`。
