@@ -5,8 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-import pytest
-
 from stateguard3r import recal3r_prerollout_pose_query_runner_v6 as runner
 from scripts import run_recal3r_prerollout_pose_query_export_v6 as script
 
