@@ -1834,6 +1834,27 @@ launched or created.
 - Audit: [recovery-policy-development-v1-result.md](../audits/recovery-policy-development-v1-result.md).
   No new blind-test acquisition/commitment is authorized by this NO-GO.
 
+### RECOVERY-ONLINE-QUARANTINE-DEVELOPMENT-V2-0001: current-frame episode rollback
+
+- Status: **completed — `ONLINE_QUARANTINE_DEVELOPMENT_FEASIBILITY_NO_GO`**.
+- Scope: only disclosed `formal-v1-inputs-0001/development` dynamic, wrong and low manifests; no download, ReCal3R
+  modification, formal-response rerun or blind acquisition.
+- Candidate: fixed Detector-v3 prefix-only current-frame quarantine. Every real alarm at frames 15--20 retained its
+  current prediction but restored the full pre-frame recurrent/model/RNG closure; committed digests equal pre-state and
+  observed-health ledgers contain every rollback frame.
+- Gate A: v2 light always controls are byte-identical to frozen v1 baselines for all four model artifacts; their
+  recurrent/policy runtime ratios are 0.9308, 0.9850 and 1.0500 (median 0.9850).
+- Gate D: candidate ATE effects are -3.2650%, -2.9494% and -1.7153%; translation-RPE effects are -2.6789%,
+  -15.4509% and -2.3883%; candidate/baseline runtime median is 2.9076 (limit 1.20). Causal isolation passed but
+  quality and deployability failed.
+- Frozen CPU evaluation: `outputs/recovery-online-quarantine-development-v2-evaluation-0001/evaluation.json`, SHA-256
+  `90818667e2d54f898d3343d8bb246822f8af4eb71da6f23e477a31a027ddbdf0`.
+- GPU: serial `CUDA_VISIBLE_DEVICES=2` on L20 UUID `GPU-d2be321e-2001-7e74-d0f0-3ee103fcd250`, >=12 GiB free before
+  each run and without touching existing users' PIDs; commands, pre/post state and exits are in
+  `logs/recovery-online-quarantine-v2-*`.
+- Audit: [recovery-online-quarantine-development-v2-result.md](../audits/recovery-online-quarantine-development-v2-result.md).
+  No v2 blind-test acquisition/commitment is authorized.
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.

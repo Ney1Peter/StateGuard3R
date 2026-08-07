@@ -1,7 +1,7 @@
 # Recovery online-quarantine development v2：连续风险 episode 隔离执行计划
 
 - 制定日期：2026-08-07
-- 状态：**执行中（独立于已完成的 v1）**
+- 状态：**已完成 — `ONLINE_QUARANTINE_DEVELOPMENT_FEASIBILITY_NO_GO`**
 - 计划窗口：12--18 小时；以预注册门禁完成为终点，不因时间耗尽而停止
 - 前置证据：[recovery-policy-development-v1-result.md](audits/recovery-policy-development-v1-result.md)
 - 受保护 baseline：ReCal3R `466c7cdf3acd2f589f1d82e5f6391966f19db9ff`
@@ -135,3 +135,33 @@ threshold、watchdog、episode定义、snapshot范围或门槛。
 下载量以单个可验证的小型官方序列为上限，冻结 source/association/code/config/candidate/threshold 后再
 允许读取新 response。若 v2 NO-GO，报告必须明确下一研究需要新的、单独授权的机制假设，不能继续在
 本计划或同一开发矩阵上调参。
+
+## 8. 实际执行记录与结束判定
+
+本计划已完成。final CPU suite 为 **458 passed**，`compileall` 通过；ReCal3R 保持 pinned clean。所有
+substantive GPU forward 都在 `CUDA_VISIBLE_DEVICES=2` 的 L20 上串行执行，并在每次启动前记录 GPU UUID、
+可用显存、其他 PID、命令与退出码。
+
+Gate A 的 v2 always-commit 与 v1 frozen baseline 的四个模型产物在三个 condition 都逐字节一致。可比较的
+`external_recurrent_and_current_policy_only` runtime ratios 是 dynamic `0.9308`、wrong `0.9850`、low
+`1.0500`，中位数 `0.9850`，所以轻量 normal path 通过性能前提。RGB overlap 是所有方法共有的输入
+instrumentation；冻结 baseline 原本在 `runtime_seconds` 外计算，v2 改为逐帧因果计算并单列为
+`wall_runtime_seconds`，不把它混入可比 recurrent/policy 计时口径。
+
+唯一 candidate 在三条 development corruption 都完成并冻结，且每条的 frames 15--20 都有 real current
+online alarm 和 `quarantine_current_rollback`。每次 rollback 的 committed digest 等于 pre digest、pending
+始终为零，observed-health ledger 完整记录被隔离 candidate。因果机制通过；但 ATE effect 为
+`-3.2650%/-2.9494%/-1.7153%`，translation-RPE effect 为 `-2.6789%/-15.4509%/-2.3883%`，
+candidate/baseline runtime ratios 为 `4.6388/2.9076/2.7462`（中位 `2.9076`，上限 `1.20`）。
+
+冻结的 CPU evaluation 为
+`outputs/recovery-online-quarantine-development-v2-evaluation-0001/evaluation.json`
+（SHA-256 `90818667e2d54f898d3343d8bb246822f8af4eb71da6f23e477a31a027ddbdf0`），outcome 是
+**`ONLINE_QUARANTINE_DEVELOPMENT_FEASIBILITY_NO_GO`**。详见
+[recovery-online-quarantine-development-v2-result.md](audits/recovery-online-quarantine-development-v2-result.md)。
+
+两个 retained pre-forward implementation failures（路径导入与 `no_grad` helper）只产生 staging cleanup 和
+exit 1，不产生 model response，也不作为 matrix evidence；修复后才有统一 code commit 的 six accepted
+forwards。此前 dynamic always output `...-0001` 是 runtime-scope 修正前的 equivalence preflight，保留但
+不作为 Gate A 的 accepted timing run；当前实现对应的 frozen accepted output 是 `...-0002`。本计划到此停止：
+不得调整 threshold、watchdog、snapshot 范围或加入 fallback。新的 output-export mechanism 必须另立 v3 假设与计划。
