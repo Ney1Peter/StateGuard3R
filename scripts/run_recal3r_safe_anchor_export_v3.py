@@ -201,14 +201,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         if observer is None:
             jumps, residuals, trajectory = smoke._output_health_signals(result.predictions, pose_encoding_to_camera=camera.pose_encoding_to_camera, np=np)
             trace = model.get_u_calibration_trace(); health = smoke._apply_v2_overlap_to_health([replace(record, pose_jump=jumps[index], geometric_residual=residuals[index]) for index, record in enumerate(adapt_recal3r_trace(trace, all_frame_ids=list(range(len(views))), timestamps=smoke._input_timestamps(args), batch_size=1))], overlaps.values); ledger = None
+            legacy_reference = smoke._input_frame_metadata(args)[0]
+            trajectory_payload = {"schema_version": "stateguard3r.trajectory.v0", "pose_encoding": "absT_quaR", "matrix_convention": "camera_to_first_input_frame_reference", "reference_frame": {"frame_id": 0, "source_index": legacy_reference["source_index"], "path": legacy_reference["path"], "sha256": legacy_reference["sha256"]}, "pose_jump": "hypot(relative_translation_l2, relative_rotation_angle_rad)", "geometric_residual": "median_l2(T_pose(pts3d_in_self_view)-pts3d_in_other_view) / max(median_l2(pts3d_in_other_view), 1e-8)", "frames": trajectory}
         else:
             health, ledger = observer.records, observer.observed_ledger; trajectory = _exported_trajectory(result.predictions, health, decode=camera.pose_encoding_to_camera)
             if len(health) != len(views) or len(ledger) != len(views): raise RuntimeError("safe-anchor observed ledger is incomplete")
+            trajectory_payload = {"schema_version": "stateguard3r.trajectory.safe-anchor-v3", "pose_encoding": "absT_quaR", "matrix_convention": "camera_to_first_input_frame_reference", "camera_pose_semantics": "exported_camera_pose; candidate health remains raw", "frames": trajectory}
         smoke._verify_preflight_inputs(args); write_health_jsonl_atomic(staging / "health.jsonl", health)
         if ledger is not None: write_health_jsonl_atomic(staging / "observed-health-ledger.jsonl", ledger)
         smoke._write_json_atomic(staging / "predictions-summary.json", summary)
         safe_frames = [{"frame_id": frame.frame_index, "path": str(frame.path), "sha256": args.image_sha256[frame.path]} for frame in args.input_manifest_data.frames]
-        smoke._write_json_atomic(staging / "trajectory.json", {"schema_version": "stateguard3r.trajectory.safe-anchor-v3", "pose_encoding": "absT_quaR", "matrix_convention": "camera_to_first_input_frame_reference", "camera_pose_semantics": "exported_camera_pose; candidate health remains raw", "frames": trajectory})
+        smoke._write_json_atomic(staging / "trajectory.json", trajectory_payload)
         smoke._write_json_atomic(staging / "timestamp-order-sidecar.json", sidecar)
         smoke._write_json_atomic(staging / "state-timeline.json", {"schema_version": SCHEMA_VERSION, "policy": args.state_policy, "watchdog": args.watchdog, "causality": "current/past raw candidate health, previous/current RGB overlap, and current/past captures only; safe export never feeds model or detector", "pending_transaction_count": 0, "source_provenance": result.source_provenance, "transactions": result.timeline})
         finished = datetime.now().astimezone().isoformat()
