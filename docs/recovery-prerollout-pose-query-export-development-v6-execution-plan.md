@@ -5,6 +5,11 @@
 - 长时目标：在 12--18 小时内，以所有预注册 Gate 的正常终态为止；不因单次好看数值、时间或日志不便提前宣布可行。
 - 唯一目标：检验 `detector-v3-incremental-prerollout-pose-query-export` 能否在不下载数据、只使用既有三个 development manifests 的条件下，同时满足 rollback/因果安全、正常路径逐字节等价、`<=1.20` runtime 和冻结跨条件质量门；任一硬门失败即诚实发布 v6 NO-GO。
 
+**执行终态（2026-08-07）：完成；`PRE_ROLLOUT_POSE_QUERY_EXPORT_V6_AVAILABILITY_OR_RUNTIME_NO_GO`。** Gate A 和
+dynamic Gate B 均通过；wrong always-control 的 `1.2380726268743498x` runtime 超过 `1.20`，触发 Gate C
+short-circuit。结果与不可变证据见
+`docs/audits/recovery-prerollout-pose-query-export-development-v6-result.md`；未运行 wrong candidate、low 或 GT evaluator。
+
 ## 1. 前置结论与唯一新假设
 
 v3 safe-anchor SE(3) motion export 满足 runtime 但在 dynamic/wrong 质量失败；v4 anchor RGB--3D registration 在 six
