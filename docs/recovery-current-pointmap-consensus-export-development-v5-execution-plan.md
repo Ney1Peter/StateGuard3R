@@ -1,7 +1,7 @@
 # Recovery current-pointmap consensus export development v5：固定格点双点图 SE(3) 计划
 
 - 制定日期：2026-08-07
-- 状态：**执行中（独立于已完成且 NO-GO 的 v1/v2/v3/v4）**
+- 状态：**已完成 — `CURRENT_POINTMAP_CONSENSUS_EXPORT_V5_AVAILABILITY_OR_RUNTIME_NO_GO`**
 - 长时目标：在 12--18 小时内，以全部预注册 Gate 的正常终态为止；不得因时间、单一好看数值或日志不便而提前宣布
   candidate-ready。
 - 唯一目标：验证 `detector-v3-incremental-current-self-cross-consensus-export` 能否在不下载数据、只使用既有三个
@@ -100,3 +100,11 @@ GPU 前必须全部通过：
 
 全部满足才写未执行的 blind acquisition plan，结论为 `CURRENT_POINTMAP_CONSENSUS_EXPORT_V5_CANDIDATE_READY`。否则为
 `CURRENT_POINTMAP_CONSENSUS_EXPORT_V5_FEASIBILITY_NO_GO`；NO-GO 是完成，不授权在已解盲 development matrix 上调参。
+
+## 执行结果（2026-08-07）
+
+Gate A 与新的 dynamic always-control `...0002` 均通过；control 四个 protected files 相对 v1 dynamic baseline
+逐字节一致，runtime ratio 为 `0.9893841433`。唯一 dynamic candidate `...0001` 在 six real alarms 的 rollback、fixed-grid
+consensus、proper SO(3) export 与 witness 上均通过，但 runtime ratio 是 `1.4113720436 > 1.20`。因此 Gate B short-circuit
+已触发：不运行 wrong/low、GT evaluator 或 quality matrix，也不调整 v5 lattice/weight/IRLS/threshold。完整不可变证据见
+[v5 result audit](audits/recovery-current-pointmap-consensus-export-development-v5-result.md)。
