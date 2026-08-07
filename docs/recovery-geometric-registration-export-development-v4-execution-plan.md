@@ -72,6 +72,12 @@ rotation determinant `+1`。这是实现前发现的数学语义勘误，不是�
 inlier/residual/proper-rotation witness、rollback 与 export action，candidate/baseline runtime `<=1.20`。任一失败即
 `GEOMETRIC_REGISTRATION_EXPORT_V4_AVAILABILITY_OR_RUNTIME_NO_GO`，不得跑 wrong/low 或试另一个 feature/threshold。
 
+已冻结的 `recovery-geometric-registration-v4-dynamic-always-commit-0003` 保留为早期数值对照：其四个 protected
+artifact 与 v1 dynamic baseline 一致、direct-child `state-timeline.json` 的 SHA-256 也与 `run.json` 一致，但
+`run.json.state_policy.timeline_path` 错误地指向原子发布前已移走的 staging 目录，且该输出早于独立 v4 runner。
+因此它**不得**作为 Gate B 的 provenance/control 证据、不得修改或覆盖；Gate B 必须从当前干净提交新建
+`...dynamic-always-commit-0004`，并要求其 metadata 显式绑定最终 direct-child timeline path。
+
 只有通过才跑 wrong/low always+candidate 的一次性冻结矩阵；所有 forward 均原子 freeze，失败不复用同名 output。
 
 ## 5. Gate C：冻结选择
