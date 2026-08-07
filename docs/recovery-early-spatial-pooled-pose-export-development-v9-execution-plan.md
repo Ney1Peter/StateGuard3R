@@ -1,7 +1,7 @@
 # Recovery early-spatial-pooled pose export development v9: execution plan
 
 - Date: 2026-08-07
-- Status: **pre-registered; implementation and GPU execution have not started**
+- Status: **pre-registered; source-corrected before implementation or GPU execution**
 - Long-horizon objective: within 14--20 hours, run this mechanism through every
   applicable hard gate with immutable evidence. The research programme advances only
   when one clean, candidate-ready mechanism satisfies causal safety, normal-path
@@ -10,6 +10,16 @@
 - Single v9 objective: determine whether a fixed early spatial-token arithmetic mean can
   replace an alarm-frame exported pose after rollback without raw pose reuse, fallback,
   new downloads, or more than 20% recurrent-policy runtime overhead.
+
+### Source correction before Gate A
+
+The initial v9 wording incorrectly treated `dec[0]` as a 768-wide sequence containing a
+pose token. Frozen ReCal3R source shows that it is instead the 576-token, 1024-wide image
+feature sequence before `decoder_embed`; the dedicated pose token is introduced only after
+that frozen projection. This was found by source inspection before a v9 component, CPU
+model check, or GPU forward existed. It is not a measured v9 result and authorizes no
+output reuse. The only compatible v9 latent is therefore the fixed arithmetic mean of all
+576 spatial tokens followed once by the frozen official projection, as specified below.
 
 ## 1. Frozen prior state and distinct hypothesis
 
@@ -20,11 +30,12 @@ terminal evidence was incomplete and an unauthorized 0001 forward occurred; see
 docs/audits/recovery-early-decoder-pose-export-v8-provenance-no-go.md.
 
 v9 tests a different latent source, not a changed index, precision, detector, or retry
-of v8. After the complete current-frame recurrent rollout, dedicated layer-0 pose token
-dec[0][:,0:1] may already carry the pose/state corruption path. The same layer non-pose
-spatial tokens dec[0][:,1:], pooled by one fixed arithmetic mean, retain current-image
-geometry while not reusing the dedicated pose token. A frozen official pose head might
-decode that pooled (1,1,768) latent into a usable alarm export.
+of v8. After the complete current-frame recurrent rollout, `dec[0]` is the early
+pre-projection spatial image sequence `(1,576,1024)`. The frozen official
+`model.decoder_embed` maps the fixed mean of precisely those 576 spatial tokens from
+`(1,1,1024)` to `(1,1,768)` before any special pose token is concatenated. The fixed mean
+retains current-image geometry while never selecting a dedicated pose token. A frozen
+official pose head might decode that pooled `(1,1,768)` latent into a usable alarm export.
 
 This remains current-image- and model-latent-dependent. It is not latent-independent
 recovery, an independently trained pose estimator, or a claim that it is disconnected
@@ -37,14 +48,16 @@ from the model shared computation.
    466c7cdf3acd2f589f1d82e5f6391966f19db9ff, and the three existing development
    manifests. The detector always consumes raw prediction; export never feeds model,
    detector, memory, state, or a later frame.
-2. Candidate only: after _recurrent_rollout returns dec, after a guard confirms that
-   dec[0] has more than one token, and before update_mem with dec[-1][:,0:1], calculate
-   exactly early_spatial_pooled_pose_token =
-   dec[0][:,1:].mean(dim=1,keepdim=True).detach().clone() when observer is present,
-   otherwise None. It has one batch, one token, and width 768. The pool is an unweighted
-   arithmetic mean over every non-pose token in layer 0; no sampling, learned projection,
-   mask, history, cache, or adaptive constant is permitted. Always-control makes no
-   token, mean, observer, or export-wrapper call and retains direct raw to_cpu(res).
+2. Candidate only: after _recurrent_rollout returns dec, after a guard confirms exactly
+   `dec[0] == (1,576,1024)`, and before update_mem with dec[-1][:,0:1], calculate exactly
+   early_spatial_pooled_pose_token =
+   model.decoder_embed(dec[0].mean(dim=1,keepdim=True)).detach().clone() when observer is
+   present, otherwise None. It has one batch, one token, and width 768. The pool is an
+   unweighted arithmetic mean over all 576 pre-projection spatial tokens, followed once
+   by the already-pinned official 1024-to-768 decoder projection. No special pose token,
+   new learned projection, sampling, mask, history, cache, or adaptive constant is
+   permitted. Always-control makes no projection/token/mean/observer/export-wrapper call
+   and retains direct raw to_cpu(res).
 3. Clear frames commit and export their normal raw camera pose. At an alarm, first execute
    frozen full rollback/witness; only then decode the already captured pooled latent with
    frozen model.downstream_head.pose_head, official postprocess_pose, and official camera
@@ -58,8 +71,9 @@ from the model shared computation.
    EARLY_SPATIAL_POOLED_POSE_UNAVAILABLE_FAIL_CLOSED; no raw pose, hold, motion, anchor,
    pointmap, retry, or fallback is exported.
 5. Alarm evidence records layer 0, source
-   decoder_layer_0_nonpose_spatial_mean_after_rollout_before_update_mem, arithmetic mean,
-   spatial-token count, shape/dtype/device/GPU digest, source hashes,
+   decoder_layer_0_preprojection_spatial_mean_after_frozen_decoder_embed_before_update_mem,
+   the frozen decoder-projection SHA/interface, arithmetic mean, exact spatial-token count
+   576, shape/dtype/device/GPU digest, source hashes,
    postprocess/proper-SO3 values, raw/exported pose digests, rollback witness and
    no-fallback status. Each alarm uses only its own current pooled token.
 
@@ -85,25 +99,36 @@ from the model shared computation.
 The v8 log failure is a process failure, so v9 has one tested, single-owner launcher.
 It must be implemented and tested before any v9 GPU child.
 
-1. Given a one-use run ID, atomically refuse if its direct output, preflight, main,
-   postflight, transcript, driver, result, or validator path already exists. Reject nested
-   or staging output paths.
+1. Validate a safe nonempty run ID and its exact direct `outputs/<run-id>` and canonical
+   `logs/<run-id>-{preflight,main,postflight,tmux-transcript,driver,result}` layout;
+   reject aliases, symlinks, nested/staging paths and every existing owner artifact. Then
+   atomically acquire a same-ID owner lease with `mkdir` or `O_CREAT|O_EXCL` under the
+   repository `tmp/` before any inspection or pane creation. The later independent
+   validator report is deliberately *not* an initial owner artifact: it is a new
+   `logs/<run-id>-validator-0001.log` created exactly once with `O_CREAT|O_EXCL` only after
+   the owner has sealed its child output and terminal evidence.
 2. In the owner process, record exactly two GPU-2 UUID
    GPU-d2be321e-2001-7e74-d0f0-3ee103fcd250 preflight snapshots. Each must report at least
    12288 MiB free. Verify preflight is NUL-free, then freeze it 0444.
-3. Create a fresh pane only in existing stateguard tmux session. Establish live pipe-pane
-   to new transcript before dispatch. Pane driver writes V9_DRIVER_START, exact command,
-   child PID and zero/nonzero exit marker; it emits V9_DRIVER_DISPATCHED immediately
-   before CUDA child and writes result only after wait observes child exit.
-4. Same owner, after result and before freezing terminal artifacts, collects timestamped
-   postflight GPU snapshot, records expected child PID absent, result exit, output file
-   modes and clean worktrees. It verifies all newly written
-   preflight/main/postflight/transcript/driver/result bytes NUL-free, then freezes each
-   0444; output root is 0555 and all files 0444.
-5. Separate one-use validator rechecks all evidence, not launcher flags. Missing/ill-ordered
-   markers, snapshot before child finish, stale PID, bad permission/NUL status, path reuse,
-   or missing postflight is terminal v9 provenance failure. It cannot be repaired by manual
-   reconstruction or a recovery ID.
+3. Create a fresh pane only in existing stateguard tmux session. Establish a live pipe-pane
+   to the new transcript, emit and observe `V9_PIPE_READY`, and only then send the driver.
+   Driver must write `V9_DRIVER_START`, an exact shlex-quoted command and command SHA that
+   were already frozen in preflight, `V9_DRIVER_DISPATCHED`, child PID plus process start
+   time, and zero/nonzero exit markers in one ordered stream. It writes result only after
+   wait reaps that exact child.
+4. Same owner waits for driver completion, detaches/closes pipe-pane, and verifies the
+   transcript has drained and cannot change before it performs any terminal check. It then
+   collects a timestamped postflight snapshot after child reaping, proves the PID/start-time
+   pair is absent (PID-reuse safe), records result exit, GPU snapshot, source/worktree and
+   output modes. It verifies all newly written preflight/main/postflight/transcript/driver/
+   result bytes are regular, NUL-free and correctly ordered, then freezes each 0444. Every
+   output directory is 0555, every output file 0444, and no output path is a symlink.
+5. Separate one-use, CPU-only validator recomputes every source hash, command/hash/order,
+   snapshot, result, path and mode instead of trusting launcher flags. It writes its own
+   report only under logs, verifies it NUL-free, and freezes it 0444. Missing/ill-ordered
+   markers, snapshot before child finish, stale/reused PID, bad permission/NUL status,
+   mutable transcript, path reuse, or missing postflight is terminal v9 provenance
+   failure. It cannot be repaired by manual reconstruction or a recovery ID.
 
 Every GPU forward uses CUDA_VISIBLE_DEVICES=2, begins from stateguard, records
 command/PID/GPU/log/output/start/finish, and checks no project process remains on GPU 2.
@@ -115,16 +140,19 @@ Before GPU execution, separately commit implementation, tests, and Gate-A audit.
 
 - synthetic identity/translation/rotation pooled-token decode tests; bad token/head/camera,
   reflection, non-SO3, device and finite failures fail closed;
-- source and AST mutation tests that reject dec[-1], token zero, a non-mean reducer,
-  pooling after update_mem, a control-path clone/observer, raw camera pose/prediction,
+- source and AST mutation tests that reject dec[-1], unprojected 1024-wide input,
+  any special-pose-token selection, a non-mean reducer, pooling after update_mem, a
+  control-path projection/clone/observer, raw camera pose/prediction,
   RGB, pointmap, confidence, anchor/history, GT/future and decoder/export cpu transfer;
 - runner tests proving candidate pool relation, rollback before export, finalization before
   CPU transfer, raw detector health, watchdog/reset/no leakage and untouched control path;
 - actual existing-checkpoint CPU test of pinned DPT pose head, official postprocess and
   float64 proper-SO3 contract;
 - unit tests of v9 launcher with non-CUDA child: fresh-path refusal, two preflights,
-  pipe-before-dispatch ordering, child result, child-PID-absent postflight, NUL rejection,
-  freeze ordering, and no manual postflight API;
+  atomic same-ID lease and concurrent-owner refusal, pipe-ready-before-dispatch ordering,
+  driver/result ordering, pipe-close-and-drain before freeze, child-PID/start-time-absent
+  postflight, NUL/alias/symlink rejection, recursive freeze modes, one-use validator
+  report, and no manual postflight API;
 - ReCal3R-Torch targeted tests, full CPU suite with repository-local tmp basetemp,
   compileall, diff check, and clean StateGuard3R/ReCal3R worktrees.
 
