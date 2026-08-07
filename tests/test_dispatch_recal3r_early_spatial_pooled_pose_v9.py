@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 from types import SimpleNamespace
 
 import pytest
@@ -13,92 +15,129 @@ from scripts import dispatch_recal3r_early_spatial_pooled_pose_v9 as dispatch
 RUN_ID = "recovery-early-spatial-pooled-pose-v9-dynamic-always-commit-0001"
 
 
-def _prepare_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def _root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "StateGuard3R"
     for name in ("outputs", "logs", "tmp"):
-        (root / name).mkdir(parents=True, exist_ok=True)
-    baseline = tmp_path / "baselines" / "ReCal3R"
-    baseline.mkdir(parents=True)
+        (root / name).mkdir(parents=True)
     monkeypatch.setattr(dispatch, "ROOT", root)
     return root
 
 
 def _argv(root: Path) -> list[str]:
     return [
-        "python", "scripts/run_recal3r_early_spatial_pooled_pose_export_v9.py",
+        "python", str(root / "scripts" / "run_recal3r_early_spatial_pooled_pose_export_v9.py"),
         "--output-dir", str(root / "outputs" / RUN_ID),
         "--state-policy", "always-commit", "--device", "cpu",
     ]
 
 
-def test_fresh_id_refuses_every_terminal_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root = _prepare_root(tmp_path, monkeypatch)
+def _result(run_id: str, argv: list[str]) -> dict[str, object]:
+    return {
+        "schema_version": "stateguard3r.v9-driver-result.v1",
+        "run_id": run_id,
+        "command_sha256": dispatch._command_hash(argv),
+        "child_pid": 731, "child_start_ticks": "123456",
+        "exit_code": 0, "reaped_at": "2026-08-07T22:00:00+08:00",
+    }
+
+
+def _markers(run_id: str, argv: list[str]) -> str:
+    result = _result(run_id, argv)
+    return "\n".join((
+        f"V9_DRIVER_START run_id={run_id}",
+        f"V9_DRIVER_COMMAND={shlex.join(argv)}",
+        f"V9_DRIVER_COMMAND_SHA256={result['command_sha256']}",
+        f"V9_DRIVER_DISPATCHED run_id={run_id}",
+        f"V9_DRIVER_CHILD_PID run_id={run_id} child_pid=731 child_start_ticks=123456",
+        f"V9_DRIVER_EXIT run_id={run_id} child_pid=731 child_start_ticks=123456 exit_code=0 reaped_at=2026-08-07T22:00:00+08:00",
+        f"V9_DRIVER_RESULT_WRITTEN run_id={run_id} child_pid=731 child_start_ticks=123456 exit_code=0",
+        "",
+    ))
+
+
+def test_canonical_paths_refuse_preexisting_artifact_and_atomic_lease(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
     paths = dispatch.artifact_paths(RUN_ID)
-    for path in (paths.output, paths.preflight, paths.main, paths.postflight, paths.transcript, paths.driver, paths.result):
-        if path == paths.output:
-            path.mkdir()
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("prior\n", encoding="utf-8")
-        with pytest.raises(dispatch.V9DispatchError, match="already exists"):
-            dispatch._fresh(paths)
-        if path.is_dir():
-            path.rmdir()
-        else:
-            path.unlink()
+    dispatch._fresh(paths)
+    dispatch._acquire_lease(paths)
+    with pytest.raises(dispatch.V9DispatchError, match="lease"):
+        dispatch._acquire_lease(paths)
+    assert paths.lease.is_dir()
+    (paths.main).write_text("prior\n", encoding="utf-8")
+    with pytest.raises(dispatch.V9DispatchError, match="already exists"):
+        dispatch._fresh(paths)
     assert root == dispatch.ROOT
 
 
-def test_dispatch_orders_pipe_before_driver_and_freezes_original_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root = _prepare_root(tmp_path, monkeypatch)
-    events: list[str] = []
-    monkeypatch.setattr(dispatch, "_git_clean", lambda _path: "clean-commit")
-    monkeypatch.setattr(dispatch, "_snapshot", lambda **_kwargs: {"selected": {"uuid": dispatch.GPU_UUID, "memory_free_mib": dispatch.MIN_FREE_MIB}, "rows": []})
+def test_driver_is_direct_child_writer_without_process_substitution_tees(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
+    paths, argv = dispatch.artifact_paths(RUN_ID), _argv(root)
+    source = dispatch._driver(RUN_ID, argv, paths, dispatch._command_hash(argv), shlex.join(argv))
+    assert '>> "$main_log" 2>&1 &' in source
+    assert "> >(" not in source
+    assert "V9_DRIVER_DISPATCHED" in source
+    assert "V9_DRIVER_CHILD_PID" in source
+    assert "V9_DRIVER_RESULT_WRITTEN" in source
+
+
+def test_dispatch_orders_pipe_before_driver_and_seals_original_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
+    paths, argv, events = dispatch.artifact_paths(RUN_ID), _argv(root), []
+    source = {"stateguard_commit": "commit", "recal3r_commit": "baseline", "component_sha256": {"x": "y"}}
+    snapshot = {"timestamp": "2026-08-07T22:00:00+08:00", "selected": {"uuid": dispatch.GPU_UUID, "memory_free_mib": dispatch.MIN_FREE_MIB}, "rows": []}
+    monkeypatch.setattr(dispatch, "_component_provenance", lambda: source)
+    monkeypatch.setattr(dispatch, "_snapshot", lambda **_kwargs: snapshot)
     monkeypatch.setattr(dispatch, "_pane", lambda: "%42")
-    monkeypatch.setattr(dispatch, "_pid_absent", lambda _pid: True)
-    monkeypatch.setattr(dispatch, "_pinned_component_provenance", lambda: [{"path": "component", "sha256": "hash", "git_blob": "blob"}])
+    monkeypatch.setattr(dispatch, "_pane_alive", lambda _pane: False)
+    monkeypatch.setattr(dispatch, "_pid_pair_absent", lambda _result: {"child_pid": 731, "expected_start_ticks": "123456", "observed_start_ticks": None, "pair_absent": True, "pid_reused": False})
+    monkeypatch.setattr(dispatch, "_run_independent_validator", lambda _run_id: {"status": "PASS", "cpu_only": True})
 
-    def fake_run(command: list[str], **_kwargs: object) -> SimpleNamespace:
-        if command[:2] == ["tmux", "pipe-pane"]:
+    def fake_tmux(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        if args[0] == "pipe-pane" and "-o" in args:
             events.append("pipe")
-        elif command[:2] == ["tmux", "send-keys"]:
-            paths = dispatch.artifact_paths(RUN_ID)
-            assert events == ["pipe"]
-            assert (paths.preflight.stat().st_mode & 0o777) == 0o444
-            events.append("send")
-            paths.main.write_text(
-                "V9_DRIVER_START\nV9_DRIVER_DISPATCHED\nV9_FORWARD_DISPATCHED child_pid=731\nV9_DRIVER_EXIT\n",
-                encoding="utf-8",
-            )
-            paths.transcript.write_text("V9_DRIVER_DISPATCHED\nV9_FORWARD_DISPATCHED child_pid=731\n", encoding="utf-8")
-            paths.output.mkdir()
-            (paths.output / "run.json").write_text("{}\n", encoding="utf-8")
-            digest = hashlib_for(_argv(root))
-            paths.result.write_text(json.dumps({"run_id": RUN_ID, "command_sha256": digest, "child_pid": 731, "exit_code": 0}) + "\n", encoding="utf-8")
-        return SimpleNamespace(stdout="")
+        elif args[0] == "send-keys":
+            command = args[3]
+            if "V9_PIPE_READY" in command:
+                assert events == ["pipe"]
+                events.append("ready")
+                paths.transcript.write_text(f"V9_PIPE_READY run_id={RUN_ID}\n", encoding="utf-8")
+            else:
+                assert events == ["pipe", "ready"]
+                events.append("driver")
+                marker_text = _markers(RUN_ID, argv)
+                paths.main.write_text(marker_text, encoding="utf-8")
+                paths.transcript.write_text(paths.transcript.read_text(encoding="utf-8") + marker_text, encoding="utf-8")
+                paths.result.write_text(json.dumps(_result(RUN_ID, argv)) + "\n", encoding="utf-8")
+                paths.output.mkdir()
+                (paths.output / "run.json").write_text("{}\n", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="")
 
-    monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
-    result = dispatch.dispatch(RUN_ID, _argv(root), timeout_seconds=1, allow_noncuda_child_for_test=True)
+    monkeypatch.setattr(dispatch, "_tmux", fake_tmux)
+    result = dispatch.dispatch(RUN_ID, argv, timeout_seconds=1, allow_noncuda_child_for_test=True)
     assert result["status"] == "PASS"
-    assert events[:2] == ["pipe", "send"]
-    paths = dispatch.artifact_paths(RUN_ID)
+    assert events == ["pipe", "ready", "driver"]
     for path in (paths.preflight, paths.main, paths.postflight, paths.transcript, paths.driver, paths.result, paths.output / "run.json"):
         assert (path.stat().st_mode & 0o777) == 0o444
         assert b"\0" not in path.read_bytes()
     assert (paths.output.stat().st_mode & 0o777) == 0o555
     postflight = json.loads(paths.postflight.read_text(encoding="utf-8"))
-    assert postflight["child_pid_absent"] is True
+    assert postflight["pipe_close_and_drain"]["drained"] is True
+    assert postflight["pid_start_time_check"]["pair_absent"] is True
+    assert postflight["output_inventory"][-1]["path"] == "run.json"
+    validator = dispatch.validate_sealed_run(RUN_ID)
+    assert validator["status"] == "PASS" and validator["cpu_only"] is True
+    assert (paths.validator.stat().st_mode & 0o777) == 0o444
+    with pytest.raises(dispatch.V9DispatchError, match="already exists"):
+        dispatch.validate_sealed_run(RUN_ID)
 
 
-def hashlib_for(argv: list[str]) -> str:
-    import hashlib
-    return hashlib.sha256(json.dumps(argv, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+def test_snapshot_requires_memory_only_in_preflight_not_postflight(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[bool] = []
 
+    def fake_run(_command: list[str], **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(stdout=f"{dispatch.GPU_UUID}, 1\n")
 
-def test_dispatch_rejects_nul_terminal_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _prepare_root(tmp_path, monkeypatch)
-    path = dispatch.artifact_paths(RUN_ID).main
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"bad\0")
-    with pytest.raises(dispatch.V9DispatchError, match="NUL"):
-        dispatch._freeze(path)
+    monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
+    with pytest.raises(dispatch.V9DispatchError, match="free-memory"):
+        dispatch._snapshot()
+    assert dispatch._snapshot(require_minimum=False)["selected"]["memory_free_mib"] == 1

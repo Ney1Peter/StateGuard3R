@@ -36,6 +36,7 @@ DEVELOPMENT_INPUT_ROOT = ROOT / "outputs" / "formal-v1-inputs-0001" / "developme
 DEVELOPMENT_MANIFESTS = frozenset(DEVELOPMENT_INPUT_ROOT / f"development-{condition}" / "input-manifest.json" for condition in ("dynamic", "wrong", "low"))
 FORMAL_V3_CONFIG = ROOT / "outputs" / "formal-v3-calibration-0001" / "formal-config.json"
 V9_COMPONENTS = (
+    ROOT / "scripts" / "dispatch_recal3r_early_spatial_pooled_pose_v9.py",
     ROOT / "scripts" / "run_recal3r_early_spatial_pooled_pose_export_v9.py",
     ROOT / "src" / "stateguard3r" / "recal3r_early_spatial_pooled_pose_runner_v9.py",
     ROOT / "src" / "stateguard3r" / "early_spatial_pooled_pose_export_v9.py",
