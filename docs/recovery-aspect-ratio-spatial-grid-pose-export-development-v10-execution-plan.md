@@ -1,6 +1,8 @@
 # v10 aspect-ratio spatial-grid pose export: execution plan
 
-- Status: preregistered after v9 terminal no-go; no v10 forward yet.
+- Status: **PRESERVED / DISABLED — PRE-GATE-A NO-GO; DO NOT EXECUTE OR
+  MODIFY.**  The count-only design is rejected in
+  `docs/audits/recovery-aspect-ratio-spatial-grid-pose-export-v10-preimplementation-no-go.md`.
 - Objective: determine whether a **resolution-locked 32x24 pre-projection
   spatial-grid mean** (768 tokens at the frozen 512x384 input geometry), then
   the frozen `decoder_embed` and official pose head, can export an alarm pose

@@ -7,6 +7,8 @@ import pytest
 
 from stateguard3r import recal3r_aspect_ratio_spatial_grid_pose_runner_v10 as runner
 
+# Historical source-integrity tests for preserved, disabled v10 only.  They do
+# not grant Gate-A or launcher authorization for this rejected mechanism.
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNNER = PROJECT_ROOT / "src" / "stateguard3r" / "recal3r_aspect_ratio_spatial_grid_pose_runner_v10.py"
@@ -20,6 +22,12 @@ def _replace_last(source: str, old: str, new: str) -> str:
 
 def _torch() -> object:
     return pytest.importorskip("torch")
+
+
+def test_v10_is_preserved_only_and_explicitly_not_authorized_for_experiment() -> None:
+    source = RUNNER.read_text(encoding="utf-8")
+    assert "PRESERVED BUT DISABLED FOR EXPERIMENTAL USE (DO NOT RUN)" in source
+    assert "no CLI or formal dispatcher may invoke" in source
 
 
 def _view(torch: object) -> dict[str, object]:

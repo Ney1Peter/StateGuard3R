@@ -1,4 +1,12 @@
-"""Independent pinned recurrent loop for v10 aspect-ratio spatial-grid pose export."""
+"""Deprecated, preserved v10 aspect-ratio spatial-grid runner.
+
+PRESERVED BUT DISABLED FOR EXPERIMENTAL USE (DO NOT RUN): v10 only relaxed
+v9's observed spatial-token count while retaining the same post-rollout
+``dec[0]`` mean mechanism. The preimplementation NO-GO records why that is not
+a mechanism-distinct successor. This module remains parseable and is kept
+intact for audit and regression tests; no CLI or formal dispatcher may invoke
+it. New recovery work must use the separately preregistered v11 route.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +22,7 @@ from .recal3r_structural_witness_v3 import StructuralIdentityWitness, Structural
 
 
 class EarlySpatialGridPoseRunnerError(RuntimeError):
-    """Raised when v10's isolated recurrent execution is unsafe."""
+    """Raised when the preserved, non-authorized v10 runner is unsafe."""
 
 
 class EarlySpatialGridPoseObserver(Protocol):
@@ -98,6 +106,9 @@ class EarlySpatialGridPoseRunnerResult:
     recurrent_policy_runtime_seconds: float
 
 
+# PRESERVED / DISABLED (DO NOT RUN): historical v10 code only.  No launcher,
+# Gate, or new experiment may call this count-only v9 variant; keep it only for
+# source-integrity regression coverage and the retained NO-GO record.
 def run_early_spatial_grid_pose_recurrent_lighter(
     views: Sequence[Mapping[str, Any]], model: Any, device: Any, *, torch: Any,
     to_gpu: Callable[[Mapping[str, Any], Any], Mapping[str, Any]], to_cpu: Callable[[Mapping[str, Any]], Mapping[str, Any]],
