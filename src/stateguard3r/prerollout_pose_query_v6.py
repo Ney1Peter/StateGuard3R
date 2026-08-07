@@ -80,7 +80,14 @@ def audit_pinned_pose_query_sources(model_path: Path, dpt_head_path: Path, postp
         "self.pose_retriever.update_mem(",
         "mem, global_img_feat_i, out_pose_feat_i",
     )
-    required_dpt = ("pose_token = x[-1][:, 0].clone()", "pose = self.pose_head(pose_token)", "pose = postprocess_pose(pose, self.pose_mode)", 'final_output["camera_pose"] = pose')
+    required_dpt = (
+        "class DPTPts3dPose",
+        "self.pose_head = PoseDecoder(hidden_size=in_dim)",
+        "pose_token = x[-1][:, 0].clone()",
+        "pose = self.pose_head(pose_token)",
+        "pose = postprocess_pose(pose, self.pose_mode)",
+        'final_output["camera_pose"] = pose',
+    )
     if any(fragment not in lighter for fragment in required_model) or any(fragment not in dpt for fragment in required_dpt) or "def postprocess_pose(out, mode, inverse=False):" not in postprocess:
         raise PreRolloutPoseQueryError("pinned ReCal3R pre-rollout pose-query topology changed")
     query_at = lighter.index(required_model[1])

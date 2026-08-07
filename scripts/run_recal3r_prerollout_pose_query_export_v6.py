@@ -75,6 +75,17 @@ def _self_provenance() -> dict[str, Any]:
         raise RuntimeError(f"cannot inspect v6 runner provenance: {error}") from error
     if changes:
         raise RuntimeError("StateGuard3R has tracked changes; v6 runner refuses execution")
+    for component in V6_COMPONENTS:
+        try:
+            relative = component.resolve(strict=True).relative_to(ROOT)
+            relative_text = str(relative)
+            smoke._git_output(ROOT, "ls-files", "--error-unmatch", "--", relative_text)
+            committed_blob = smoke._git_output(ROOT, "rev-parse", f"HEAD:{relative_text}")
+            working_blob = smoke._git_output(ROOT, "hash-object", "--", relative_text)
+        except Exception as error:
+            raise RuntimeError(f"v6 component is not tracked at HEAD: {component}") from error
+        if committed_blob != working_blob:
+            raise RuntimeError(f"v6 component differs from its HEAD blob: {component}")
     return {
         "repository_root": str(ROOT),
         "commit": commit,
@@ -91,6 +102,18 @@ def _component_provenance() -> list[dict[str, str]]:
         resolved = path.resolve(strict=True)
         result.append({"path": str(resolved), "sha256": smoke._sha256(resolved)})
     return result
+
+
+def _pinned_pose_head_interface(model: Any, dpt_head_module: Any) -> tuple[Any, Any]:
+    """Fail closed unless the loaded model exposes the audited official head."""
+    expected = getattr(dpt_head_module, "DPTPts3dPose", None)
+    downstream = getattr(model, "downstream_head", None)
+    if expected is None or type(downstream) is not expected:
+        raise RuntimeError("v6 model downstream head is not pinned DPTPts3dPose")
+    pose_head, pose_mode = getattr(downstream, "pose_head", None), getattr(downstream, "pose_mode", None)
+    if not callable(pose_head) or not isinstance(pose_mode, tuple) or len(pose_mode) != 3:
+        raise RuntimeError("v6 pinned DPT pose-head interface is unavailable")
+    return pose_head, pose_mode
 
 
 def _median_numpy_equivalent(torch: Any, values: Any) -> Any:
@@ -238,17 +261,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         module_paths = {"add_ckpt_path": smoke._assert_module_source(add_ckpt_path_module, args.baseline_root / "add_ckpt_path.py", "add_ckpt_path")}
         add_ckpt_path_module.add_path_to_dust3r(str(args.baseline_src / args.checkpoint.name))
         import dust3r.model as dust3r_model
+        import dust3r.heads.dpt_head as dpt_head
         import dust3r.utils.camera as camera
         import dust3r.utils.device as device_module
         import dust3r.heads.postprocess as pose_postprocess
         import models.curope.curope2d as curope
-        module_paths.update({"dust3r.model": smoke._assert_module_source(dust3r_model, args.baseline_src / "dust3r" / "model.py", "dust3r.model"), "dust3r.utils.camera": smoke._assert_module_source(camera, args.baseline_src / "dust3r" / "utils" / "camera.py", "dust3r.utils.camera")})
+        module_paths.update({"dust3r.model": smoke._assert_module_source(dust3r_model, args.baseline_src / "dust3r" / "model.py", "dust3r.model"), "dust3r.heads.dpt_head": smoke._assert_module_source(dpt_head, args.baseline_src / "dust3r" / "heads" / "dpt_head.py", "dust3r.heads.dpt_head"), "dust3r.utils.camera": smoke._assert_module_source(camera, args.baseline_src / "dust3r" / "utils" / "camera.py", "dust3r.utils.camera")})
         model, checkpoint_audit = smoke._load_model_with_state_dict_audit(dust3r_model.ARCroco3DStereo, args.checkpoint, torch)
         smoke._write_json_atomic(staging / "checkpoint-load-audit.json", checkpoint_audit)
         if checkpoint_audit["strict"] is not False or checkpoint_audit["missing_keys"] or checkpoint_audit["unexpected_keys"]:
             raise RuntimeError("checkpoint audit failed")
         interface = smoke._validate_model_interface(model, args.checkpoint.name)
         model = model.to(args.device)
+        pose_head, pose_mode = _pinned_pose_head_interface(model, dpt_head)
         config = smoke._configure_official_recal3r_runtime(model, beta_base=args.beta_base)
         model.eval()
         model.enable_u_calibration_trace(oracle_window=1)
@@ -267,9 +292,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 IncrementalOnlinePrefixDetector(FrozenDetectorV3Config.from_mapping(config_payload), captures=captures, capture_provenance=capture_provenance),
                 PreRolloutPoseQueryExport(
                     torch=torch,
-                    pose_head=model.downstream_head.pose_head,
+                    pose_head=pose_head,
                     postprocess_pose=pose_postprocess.postprocess_pose,
-                    pose_mode=model.downstream_head.pose_mode,
+                    pose_mode=pose_mode,
                     pose_encoding_to_camera=camera.pose_encoding_to_camera,
                 ),
                 timestamps=smoke._input_timestamps(args),
