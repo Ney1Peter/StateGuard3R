@@ -44,6 +44,7 @@ def run_safe_anchor_recurrent_lighter(
     to_gpu: Callable[[Mapping[str, Any], Any], Mapping[str, Any]], to_cpu: Callable[[Mapping[str, Any]], Mapping[str, Any]],
     canonicalize_model_update_type: Callable[[Any], str], before_frame: Callable[[int, Mapping[str, Any]], Any] | None = None,
     observer: SafeAnchorObserver | None = None, watchdog_limit: int = 8, verify_source: bool = True,
+    synchronize: Callable[[], None] | None = None,
 ) -> SafeAnchorRunnerResult:
     """Run exactly the pinned lighter body, with v3 rollback/export hooks."""
     if not views:
@@ -63,6 +64,12 @@ def run_safe_anchor_recurrent_lighter(
         if i and _reset_requested(raw_view.get("reset")):
             raise SafeAnchorRunnerError("safe-anchor recovery fails closed at a non-initial reset boundary")
         frame_context = before_frame(i, raw_view) if before_frame is not None else None
+        # The public v1 baseline excludes the common RGB-overlap work.  A
+        # boundary synchronization therefore makes this interval an honest
+        # comparable recurrent/policy wall time rather than a CUDA enqueue
+        # time that accidentally overlaps a subsequent overlap calculation.
+        if synchronize is not None:
+            synchronize()
         started = time.perf_counter()
         view = to_gpu(raw_view, device)
         device = view["img"].device
@@ -149,6 +156,8 @@ def run_safe_anchor_recurrent_lighter(
         predictions.append(exported)
         evidence = dict(observer.timeline_evidence(observation)) if observer is not None else {}
         timeline.append({"frame_id": i, "action": action, "reason": reason, "current_alarm": quarantine, "consecutive_rollbacks": consecutive, "pending_transaction_count": 0, "restore_witness": restore_evidence, **dict(export_evidence), **evidence})
+        if synchronize is not None:
+            synchronize()
         elapsed += time.perf_counter() - started
     return SafeAnchorRunnerResult(predictions, views, timeline, source_provenance, elapsed)
 
