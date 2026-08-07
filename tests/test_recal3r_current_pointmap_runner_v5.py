@@ -30,3 +30,6 @@ def test_runner_error_is_distinct_and_runner_does_not_delegate_to_v3_or_v4() -> 
     source = Path(runner.__file__).read_text()
     assert "recal3r_safe_anchor_runner_v3" not in source
     assert "recal3r_geometric_registration_runner_v4" not in source
+    assert "raw_prediction = to_cpu(res)" not in source
+    assert "observer.finalize(observation, quarantined=quarantine, prediction=res)" in source
+    assert "predictions.append(to_cpu(exported))" in source
