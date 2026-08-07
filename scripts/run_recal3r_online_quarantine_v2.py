@@ -286,6 +286,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     torch.manual_seed(args.seed)
     if args.device == "cuda":
         torch.cuda.manual_seed_all(args.seed)
+    # The official loader used by ``_prepare_input_views`` imports dust3r, so
+    # its pinned source root must be visible before any model-ready RGB is read.
+    if str(args.baseline_root) not in sys.path:
+        sys.path.insert(0, str(args.baseline_root))
     smoke._verify_preflight_inputs(args)
     views = smoke._prepare_input_views(args, torch)
     captures, capture_provenance = capture_timestamp_records(
@@ -299,7 +303,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.output_dir = staging
     try:
         run_started_at = datetime.now().astimezone().isoformat()
-        sys.path.insert(0, str(args.baseline_root))
         import add_ckpt_path as add_ckpt_path_module
 
         module_paths = {"add_ckpt_path": smoke._assert_module_source(add_ckpt_path_module, args.baseline_root / "add_ckpt_path.py", "add_ckpt_path")}
