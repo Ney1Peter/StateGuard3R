@@ -180,6 +180,29 @@ def test_fresh_refuses_broken_symlink_and_child_rejects_wrapper_injection(tmp_pa
         dispatch._child(injected, paths, test=True)
 
 
+def test_nul_and_output_symlink_are_rejected_without_repair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
+    paths = dispatch.artifact_paths(RUN_ID)
+    paths.main.write_bytes(b"marker\0corruption")
+    with pytest.raises(dispatch.V9DispatchError, match="contains NUL"):
+        dispatch._read_regular_nul_free(paths.main, label="test main")
+    with pytest.raises(dispatch.V9DispatchError, match="NUL-containing"):
+        dispatch._write(root / "logs" / "nul-write.log", "never\0write")
+    paths.output.mkdir()
+    (paths.output / "aliased-output").symlink_to(paths.main)
+    with pytest.raises(dispatch.V9DispatchError, match="symlink"):
+        dispatch._freeze_output(paths.output)
+    assert (paths.output / "aliased-output").is_symlink()
+
+
+def test_cli_exposes_no_manual_postflight_or_repair_operation() -> None:
+    parser = dispatch._parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--postflight"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--repair"])
+
+
 def test_wait_for_result_retries_partial_json_until_the_exclusive_writer_finishes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _root(tmp_path, monkeypatch)
     paths, argv = dispatch.artifact_paths(RUN_ID), _argv(root)
