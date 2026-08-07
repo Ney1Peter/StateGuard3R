@@ -11,10 +11,12 @@
 ## Mechanism and distinction
 
 v9 failed because its post-rollout `dec[0]` guard literally required 576
-tokens. The pinned loader resizes images to 512×384 and the pinned 16-pixel
-patch embed implies a 32×24 (=768) grid. This is source-derived topology, not
-yet a v11 runtime measurement. The rejected v10 design only changed that
-count and is documented separately as a pre-Gate-A mechanism-boundary no-go.
+tokens. The production loader (`load_images_for_eval`) resizes the long side to
+512 then center-crops to 16-pixel geometry; the prior v9 terminal evidence
+recorded 512×384 and its 16-pixel patch grid therefore had 768 tokens. That is
+source-plus-v9 evidence, not yet a v11 runtime measurement. The rejected v10
+design only changed that count and is documented separately as a pre-Gate-A
+mechanism-boundary no-go.
 
 v11 never reads `dec[0]` and does not wait for recurrent rollout.  Candidate
 policy only captures the frozen model's native current-image global feature
@@ -68,7 +70,12 @@ Before CUDA, require all of the following:
    `(1,1,1024)` current-model output projects to `(1,1,768)`; wrong
    shape/dtype/device/nonfinite values fail closed. Test the official
    pose-head/postprocess/camera and proper-SO(3) contract on the existing
-   checkpoint.
+   checkpoint. In addition, a CUDA-disabled real-frame probe must load only
+   dynamic-manifest frame 0 through `load_images_for_eval`, call only
+   `_encode_image` → `_get_img_level_feat` → `decoder_embed` → official
+   pose-head/postprocess/camera, record the loaded geometry and encoder count,
+   and prove that it called no rollout, pose-retriever/memory, detector, GT or
+   future-frame path. The observed count is evidence, never a v11 guard.
 2. Add AST/source mutation tests proving candidate capture is after feature
    selection and before pose retrieval/rollout/memory, uses
    `_get_img_level_feat` then `decoder_embed` exactly once, and forbids

@@ -21,11 +21,13 @@ The pinned ReCal3R source hashes are:
 | `src/dust3r/patch_embed.py` | `c0dae36e876d2124f0e31403a3a306db7e6d5bd69d8e9c6f16bbfb81c82eef3d` |
 | `src/dust3r/utils/image.py` | `a2738085cdf0f713289a3a42dbd49a1f39325eb3ad590af65970fe4609209d96` |
 
-`load_images_512` resizes to 512×384. `ManyAR_PatchEmbed.forward` enforces
-16-pixel patch divisibility and flattens its spatial patch grid. Therefore a
-512×384 image implies 32×24=768 image tokens. This is an arithmetic inference
-from source; v11 must log its actual runtime shape rather than turn it into a
-new fixed guard.
+The production runner calls `load_images_for_eval`, which resizes the long
+side to 512 and center-crops the result to its 16-pixel input geometry.
+`ManyAR_PatchEmbed.forward` enforces 16-pixel patch divisibility and flattens
+its spatial patch grid. The prior v9 terminal evidence recorded 512×384, for
+which the arithmetic grid is 32×24=768 image tokens. A v11 real-frame CPU
+probe must log the actual geometry and count rather than turn that historical
+observation into a new fixed guard.
 
 In `model.py`, `_get_img_level_feat(feat)` is the official
 `torch.mean(feat, dim=1, keepdim=True)`. The normal recurrent path calculates
