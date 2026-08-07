@@ -36,8 +36,10 @@ current-frame consensus”，绝不声称 cross pointmap 与 pose latent 完全�
    nearest-integer lattice（含四条边，共 256 对）。只保留两点有限且 `conf_self > 0`、`conf > 0` 的 pair；少于 `192` 对
    即 `CURRENT_POINTMAP_CONSENSUS_UNAVAILABLE_FAIL_CLOSED`。
 4. 初始 weight 固定为 `sqrt(min(conf_self, conf))`。固定执行两轮 Tukey-bisquare IRLS weighted Kabsch，Tukey constant
-   `4.685`，robust scale 为 `1.4826 * MAD(residual)`；任一 nonfinite/zero MAD、无正 robust weight、source/target weighted
-   centered rank < 3、或 final positive robust weight < `128` 都 fail-closed。没有 data-dependent hyperparameter selection。
+   `4.685`，robust scale 为 `max(1.4826 * MAD(residual), 1e-6 * max(weighted_median_l2(cross_3d), 1e-3))`；这是为 exact
+   identity/noiseless synthetic case 明确固定的量纲一致 scale floor，而不是 development 调参。任一 nonfinite MAD/scale、无正
+   robust weight、source/target weighted centered rank < 3、或 final positive robust weight < `128` 都 fail-closed。没有
+   data-dependent hyperparameter selection。
 5. 最终 transform 必须 finite homogeneous 4x4、proper SO(3)（`|det(R)-1|<=1e-8`、`max|R^T R-I|<=1e-8`），并满足
    `weighted_median_l2(residual) / max(weighted_median_l2(cross_3d), 1e-3) <= 0.05`。只通过 pinned
    `camera_to_pose_encoding(..., "absT_quaR")` 写回；raw pose 只能提供 device/dtype template，且 encoder/decode
