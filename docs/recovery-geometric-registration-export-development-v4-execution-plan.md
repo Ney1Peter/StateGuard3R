@@ -35,8 +35,10 @@ v3 fallback、hold 或任何 donor pose。
 
 固定 registration config（在实现与任何 v4 forward 前锁定）：复用 frozen v2 ORB `nfeatures=2000`、ratio
 `0.70`、single-thread seed `0`；3D RANSAC seed `0`、256 hypotheses、每项 3 pairs、至少 24 个 finite pairs、至少
-16 inliers；inlier cutoff 为 `0.05 * max(median_l2(anchor_3d), 1e-3)`，并要求 sampled/inlier centered rank 3、
-proper rotation determinant `+1`。像素 correspondence 以 nearest integer indexing 读取同分辨率 pointmap。以上皆非
+16 inliers；inlier cutoff 为 `0.05 * max(median_l2(anchor_3d), 1e-3)`，并要求 RANSAC 三点 sample centered rank 2
+（即 non-collinear；三点 centered 后数学上最高只能为 rank 2）及 refined inlier cloud centered rank 3、proper
+rotation determinant `+1`。这是实现前发现的数学语义勘误，不是基于 development output 的参数选择。像素 correspondence
+以 nearest integer indexing 读取同分辨率 pointmap。以上皆非
 由 v3 quality 数值选择，v4 内不得改动。
 
 ## 2. 不可变边界
