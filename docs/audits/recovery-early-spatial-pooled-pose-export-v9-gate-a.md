@@ -2,15 +2,10 @@
 
 - Date: 2026-08-07
 - Scope: code/source/causality/CPU gate only. **No v9 CUDA forward was run.**
-- Decision: **SUPERSEDED / NOT AUTHORIZING GPU.** The former PASS wording in
-  this document was based on dispatcher revision `872c748`, whose tests did
-  not establish the pre-registered atomic lease, observed pipe-ready
-  handshake, closed-and-drained transcript, PID/start-time proof, recursive
-  immutable modes, or independent one-use validator. It must not be used to
-  start the dynamic control, candidate, wrong/low condition, or any v8
-  activity. A replacement Gate-A audit will cite the corrected launcher
-  revision and a fresh complete CPU evidence set only after all listed tests
-  pass.
+- Decision: **PASS — authorize only the preregistered v9 dynamic
+  always-commit control.** This replacement audit supersedes the withdrawn
+  pre-identity-gate assessment. It does not authorize the dynamic candidate,
+  wrong/low conditions, quality evaluation, or any v8 activity.
 
 ## Mechanism bound before execution
 
@@ -39,9 +34,9 @@ call an export wrapper.
 
 | Item | Value |
 | --- | --- |
-| StateGuard3R implementation commit | 2eda68d0babeb27f9d5727e8e70ecf1935eca7d4 |
-| Gate-A tests/initial dispatcher commit | 872c748539102ec2a572f15d7070d874253f2f32 |
-| Sealed dispatcher/independent-validator commit | 2406300 |
+| StateGuard3R Gate-A source commit | `4e8ef54c5b3d0cf9ba0853b0151bfdc13aa68d45` |
+| Two-phase identity-gate implementation | `f514db4` |
+| Terminal-evidence/identity-gate tests | `4e8ef54` |
 | ReCal3R commit | 466c7cdf3acd2f589f1d82e5f6391966f19db9ff |
 | Checkpoint SHA-256 | 45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103 |
 | ReCal3R model SHA-256 | 32785a6f29fded66aa142207b29a33d7522f0c39aa068fe2175a956ec8dbc3c1 |
@@ -60,8 +55,8 @@ The Torch-enabled targeted invocation was:
     PYTHONPATH="src:/data/wangzheng/Project2/baselines/ReCal3R/.venv/lib/python3.11/site-packages" \
     .venv/bin/python -m pytest -q [five v9 test files]
 
-Result: **23 passed in 23.25 s** after the sealed dispatcher/validator
-hardening (the earlier Gate-A runs were 22 passed in 22.80 s and 23.51 s). It
+Result: **43 passed in 24.71 s** on the final committed identity-gate
+revision. It
 covers:
 
 - mean/projection equivalence; rejection of unprojected 1024-wide input;
@@ -79,12 +74,17 @@ covers:
 - v9 CLI/provenance/direct-output constraints; and
 - a non-CUDA-child dispatcher simulation that proves fresh-ID refusal, two
   preflight snapshots, pipe-pane before driver dispatch, result-before-
-  postflight, PID-absent postflight, NUL rejection, and freeze ordering.
+  postflight, PID-absent postflight, NUL rejection, and freeze ordering; and
+- a real bash two-phase identity gate: the payload cannot exec until its
+  PID/start-time pair is recorded and independently re-read, then a random
+  one-use release token is created. A pre-exec identity failure immediately
+  seals a distinct, no-result `PREEXEC_IDENTITY_NO_GO` record; it cannot be
+  mistaken for a payload forward.
 
 The complete StateGuard3R CPU regression was also run with the repository
-virtualenv:
+virtualenv on this same committed worktree:
 
-    521 passed, 38 skipped in 48.41s
+    542 passed, 38 skipped; 0 failed, 0 errors
 
 The skips are the existing no-Torch tests in that virtualenv; every new
 Torch-sensitive v9 check ran in the separately stated Torch-enabled
@@ -107,11 +107,10 @@ markers, pipe drain, PID/start-time absence proof, output inventory, NUL
 status, and permissions. The validator report is itself one-use and frozen.
 The launcher has no repair, postflight-only, validator-retry, or ID-reuse API.
 
-## Withdrawn next action and stop rules
+## Authorized next action and stop rules
 
-There is currently **no authorized v9 forward**. The previously named
-`recovery-early-spatial-pooled-pose-v9-dynamic-always-commit-0001` remains
-unconsumed and may only be considered after a replacement Gate-A PASS.
+The only authorized v9 forward is
+`recovery-early-spatial-pooled-pose-v9-dynamic-always-commit-0001`.
 
 It must use the single-owner dispatcher, GPU 2 UUID
 GPU-d2be321e-2001-7e74-d0f0-3ee103fcd250, the dynamic development manifest,
