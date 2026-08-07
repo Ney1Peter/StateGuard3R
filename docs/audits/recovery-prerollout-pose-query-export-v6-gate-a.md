@@ -47,7 +47,7 @@ copy/hold/motion fallback 或 retry。
 | 验证 | 结果 |
 | --- | --- |
 | ReCal3R Torch 环境 v6 targeted tests | `16 passed in 3.02s` |
-| 真实 ReCal3R `PoseDecoder` + official postprocess/camera direct CPU check | pass；float64 exported pose/camera，det error `2.22e-16`，orthonormality error `4.44e-16`，均 `<=1e-8` |
+| 真实 checkpoint-loaded ReCal3R `ARCroco3DStereo.downstream_head` + official postprocess/camera direct CPU check | pass；head type 是 pinned `DPTPts3dPose`，strict load 无 missing/unexpected key，float64 exported pose/camera，det error `0`，orthonormality error `2.22e-16`，均 `<=1e-8`；immutable log `logs/recovery-prerollout-pose-query-v6-gate-a-actual-model-cpu-0001.log` |
 | project-local full CPU suite（`--basetemp` 位于 repository `tmp/`） | `495 passed, 10 skipped in 50.28s`；skip 全为 project `.venv` 未安装 Torch 的既有 v4/v5 与 v6 Torch modules，不是失败 |
 | compileall（`src/stateguard3r` 与 scripts） | pass |
 | `git diff --check` | pass |
