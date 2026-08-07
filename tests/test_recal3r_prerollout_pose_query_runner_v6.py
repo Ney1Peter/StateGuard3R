@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+import pytest
 
 from stateguard3r import recal3r_prerollout_pose_query_runner_v6 as runner
 from scripts import run_recal3r_prerollout_pose_query_export_v6 as script
@@ -58,3 +63,42 @@ def test_v6_script_exposes_only_preregistered_policy_and_components() -> None:
     component_paths = {str(item.resolve()) for item in script.V6_COMPONENTS}
     assert str(Path(script.__file__).resolve()) in component_paths
     assert any(path.endswith("recal3r_prerollout_pose_query_runner_v6.py") for path in component_paths)
+
+
+def test_v6_script_fails_closed_without_the_pinned_dpt_pose_head() -> None:
+    class _PinnedHead:
+        pose_mode = ("exp", -float("inf"), float("inf"))
+
+        def pose_head(self, value: object) -> object:
+            return value
+
+    module = SimpleNamespace(DPTPts3dPose=_PinnedHead)
+    pose_head, pose_mode = script._pinned_pose_head_interface(SimpleNamespace(downstream_head=_PinnedHead()), module)
+    assert callable(pose_head)
+    assert pose_mode == _PinnedHead.pose_mode
+    with pytest.raises(RuntimeError, match="not pinned"):
+        script._pinned_pose_head_interface(SimpleNamespace(downstream_head=object()), module)
+
+    class _NoPose:
+        pass
+
+    with pytest.raises(RuntimeError, match="interface"):
+        script._pinned_pose_head_interface(SimpleNamespace(downstream_head=_NoPose()), SimpleNamespace(DPTPts3dPose=_NoPose))
+
+
+def test_v6_provenance_rejects_an_untracked_runtime_component(monkeypatch: pytest.MonkeyPatch) -> None:
+    component = Path(script.__file__).resolve()
+    monkeypatch.setattr(script, "V6_COMPONENTS", (component,))
+
+    def fake_git_output(_root: Path, *args: str) -> str:
+        if args == ("rev-parse", "HEAD"):
+            return "commit"
+        if args == ("status", "--porcelain", "--untracked-files=no"):
+            return ""
+        if args[:2] == ("ls-files", "--error-unmatch"):
+            raise RuntimeError("not tracked")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(script.smoke, "_git_output", fake_git_output)
+    with pytest.raises(RuntimeError, match="not tracked at HEAD"):
+        script._self_provenance()
