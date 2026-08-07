@@ -382,7 +382,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if device.type == "cuda":
             torch.cuda.synchronize(device)
-        elapsed = time.perf_counter() - started
+        wall_elapsed = time.perf_counter() - started
+        elapsed = result.recurrent_policy_runtime_seconds
         peak_memory_mib = float(torch.cuda.max_memory_allocated(device) / (1024**2)) if device.type == "cuda" else 0.0
         if update_calls != len(views) - 1:
             raise RuntimeError(f"expected {len(views) - 1} calibrated updates, observed {update_calls}")
@@ -482,7 +483,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "online_detector": {"config": config_artifact, "allowed_inputs": ["candidate_model_health", "previous_current_model_ready_rgb_overlap", "raw_rgb_capture_timestamp"], "forbidden": ["GT", "depth", "label", "event", "source_index", "future_frame", "baseline_alarm_artifact"]},
             "state_policy": {"name": args.state_policy, "watchdog": args.watchdog, "timeline_path": str(staging / "state-timeline.json"), "timeline_sha256": smoke._sha256(staging / "state-timeline.json")},
             "runtime_seconds": elapsed,
-            "runtime_scope": "external_structural_snapshot_only_on_actual_quarantine",
+            "wall_runtime_seconds": wall_elapsed,
+            "runtime_scope": "external_recurrent_and_current_policy_only; excludes causal RGB-overlap instrumentation common to frozen baseline",
             "fps": len(views) / elapsed if elapsed > 0 else None,
             "started_at": run_started_at,
             "finished_at": finished_at,

@@ -10,6 +10,7 @@ reference-only pre-frame closure captured immediately before that candidate.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .recal3r_online_quarantine_v2 import (
@@ -53,6 +54,7 @@ class OnlineQuarantineRunnerResult:
     views: Sequence[Mapping[str, Any]]
     timeline: list[Mapping[str, Any]]
     source_provenance: Mapping[str, Any]
+    recurrent_policy_runtime_seconds: float
 
 
 def run_online_quarantine_recurrent_lighter(
@@ -79,6 +81,7 @@ def run_online_quarantine_recurrent_lighter(
     model_update_type = model.config.model_update_type
     predictions: list[Mapping[str, Any]] = []
     timeline: list[Mapping[str, Any]] = []
+    recurrent_policy_runtime_seconds = 0.0
     reset_mask: Any = False
     if model._uses_update_pressure_update() and hasattr(model, "update_pressure"):
         del model.update_pressure
@@ -86,7 +89,13 @@ def run_online_quarantine_recurrent_lighter(
     for i, raw_view in enumerate(views):
         if i > 0 and _reset_requested(raw_view.get("reset")):
             raise OnlineQuarantineRunnerError("online quarantine fails closed at a non-initial reset boundary")
+        # RGB-overlap extraction is common detector instrumentation and was
+        # precomputed outside ``runtime_seconds`` in the frozen baseline.  It
+        # remains causal here, but is intentionally outside the comparable
+        # recurrent/policy scope.  Current health scoring and rollback stay in
+        # the timed scope below because they are candidate-specific policy work.
         frame_context = before_frame(i, raw_view) if before_frame is not None else None
+        recurrent_started = time.perf_counter()
         view = to_gpu(raw_view, device)
         device = view["img"].device
         batch_size = view["img"].shape[0]
@@ -237,8 +246,15 @@ def run_online_quarantine_recurrent_lighter(
                 **evidence,
             }
         )
+        recurrent_policy_runtime_seconds += time.perf_counter() - recurrent_started
 
-    return OnlineQuarantineRunnerResult(predictions=predictions, views=views, timeline=timeline, source_provenance=source_provenance)
+    return OnlineQuarantineRunnerResult(
+        predictions=predictions,
+        views=views,
+        timeline=timeline,
+        source_provenance=source_provenance,
+        recurrent_policy_runtime_seconds=recurrent_policy_runtime_seconds,
+    )
 
 
 __all__ = [
