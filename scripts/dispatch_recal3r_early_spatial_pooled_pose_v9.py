@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shlex
@@ -36,6 +37,41 @@ PINNED_COMPONENTS = (
     Path("src/stateguard3r/early_spatial_pooled_pose_v9.py"),
     Path("scripts/dispatch_recal3r_early_spatial_pooled_pose_v9.py"),
 )
+RECAL3R_ROOT = ROOT.parent / "baselines" / "ReCal3R"
+RECAL3R_COMMIT = "466c7cdf3acd2f589f1d82e5f6391966f19db9ff"
+CHECKPOINT = RECAL3R_ROOT / "src" / "cut3r_512_dpt_4_64.pth"
+CHECKPOINT_SHA256 = "45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103"
+DETECTOR_CONFIG = ROOT / "outputs" / "formal-v3-calibration-0001" / "formal-config.json"
+DEVELOPMENT_MANIFESTS = tuple(
+    ROOT / "outputs" / "formal-v1-inputs-0001" / "development" / f"development-{condition}" / "input-manifest.json"
+    for condition in ("dynamic", "wrong", "low")
+)
+CONTROL_RUN_ID = "recovery-early-spatial-pooled-pose-v9-dynamic-always-commit-0001"
+CANDIDATE_RUN_ID = "recovery-early-spatial-pooled-pose-v9-dynamic-candidate-0001"
+RUN_SPECS = {
+    CONTROL_RUN_ID: ("dynamic", "always-commit"),
+    CANDIDATE_RUN_ID: ("dynamic", "detector-v3-incremental-early-spatial-pooled-pose-export"),
+    "recovery-early-spatial-pooled-pose-v9-wrong-always-commit-0001": ("wrong", "always-commit"),
+    "recovery-early-spatial-pooled-pose-v9-wrong-candidate-0001": ("wrong", "detector-v3-incremental-early-spatial-pooled-pose-export"),
+    "recovery-early-spatial-pooled-pose-v9-low-always-commit-0001": ("low", "always-commit"),
+    "recovery-early-spatial-pooled-pose-v9-low-candidate-0001": ("low", "detector-v3-incremental-early-spatial-pooled-pose-export"),
+}
+PINNED_EXTERNALS = (
+    CHECKPOINT,
+    RECAL3R_ROOT / "src" / "dust3r" / "model.py",
+    RECAL3R_ROOT / "src" / "dust3r" / "heads" / "dpt_head.py",
+    RECAL3R_ROOT / "src" / "dust3r" / "heads" / "postprocess.py",
+    DETECTOR_CONFIG,
+    *DEVELOPMENT_MANIFESTS,
+)
+V1_DYNAMIC_CONTROL = ROOT / "outputs" / "recovery-policy-development-v1-dynamic-always-commit-0001"
+PROTECTED_MODEL_OUTPUTS = (
+    "checkpoint-load-audit.json",
+    "health.jsonl",
+    "predictions-summary.json",
+    "trajectory.json",
+)
+RUNTIME_RATIO_LIMIT = 1.20
 
 
 class V9DispatchError(RuntimeError):
@@ -158,6 +194,15 @@ def _write_json(path: Path, payload: Any, mode: int = 0o644) -> None:
     _write(path, json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n", mode)
 
 
+def _sha256_file(path: Path) -> str:
+    """Hash large pinned artifacts without loading a multi-GB checkpoint at once."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _read_regular_nul_free(path: Path, *, label: str) -> bytes:
     if _lstat_kind(path) != "regular":
         raise V9DispatchError(f"{label} is missing, a symlink, or nonregular: {path}")
@@ -269,12 +314,39 @@ def _component_provenance() -> Mapping[str, Any]:
         baseline_commit = subprocess.run(
             ["git", "-C", str(baseline), "rev-parse", "HEAD"], check=True, text=True, capture_output=True,
         ).stdout.strip()
+        if baseline_commit != RECAL3R_COMMIT:
+            raise V9DispatchError("ReCal3R commit differs from the preregistered v9 revision")
     except subprocess.CalledProcessError as error:
         raise V9DispatchError("cannot inspect pinned source provenance") from error
-    return {"stateguard_commit": commit, "recal3r_commit": baseline_commit, "component_sha256": components}
+    external: dict[str, str] = {}
+    for path in PINNED_EXTERNALS:
+        if _lstat_kind(path) != "regular":
+            raise V9DispatchError(f"pinned external input is missing or unsafe: {path}")
+        external[str(path)] = _sha256_file(path)
+    if external[str(CHECKPOINT)] != CHECKPOINT_SHA256:
+        raise V9DispatchError("pinned checkpoint SHA-256 differs")
+    return {"stateguard_commit": commit, "recal3r_commit": baseline_commit, "component_sha256": components, "external_sha256": external}
 
 
-def _snapshot(*, require_minimum: bool = True) -> dict[str, Any]:
+def _project_gpu2_processes() -> list[Mapping[str, Any]]:
+    command = ["nvidia-smi", "--query-compute-apps=gpu_uuid,pid,process_name,used_memory", "--format=csv,noheader,nounits"]
+    result = subprocess.run(command, check=True, text=True, capture_output=True)
+    project: list[Mapping[str, Any]] = []
+    for line in result.stdout.splitlines():
+        values = [value.strip() for value in line.split(",")]
+        if len(values) != 4 or values[0] != GPU_UUID or not values[1].isdigit():
+            continue
+        pid = int(values[1])
+        try:
+            command_line = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
+        except OSError:
+            command_line = "<unavailable>"
+        if str(ROOT) in command_line or str(RECAL3R_ROOT) in command_line:
+            project.append({"gpu_uuid": values[0], "pid": pid, "process_name": values[2], "used_memory_mib": values[3], "command": command_line})
+    return project
+
+
+def _snapshot(*, require_minimum: bool = True, require_project_absent: bool = True) -> dict[str, Any]:
     command = ["nvidia-smi", "--query-gpu=uuid,memory.free", "--format=csv,noheader,nounits"]
     result = subprocess.run(command, check=True, text=True, capture_output=True)
     rows = []
@@ -285,7 +357,10 @@ def _snapshot(*, require_minimum: bool = True) -> dict[str, Any]:
     selected = [row for row in rows if row["uuid"] == GPU_UUID]
     if len(selected) != 1 or (require_minimum and selected[0]["memory_free_mib"] < MIN_FREE_MIB):
         raise V9DispatchError("GPU 2 UUID/free-memory precondition failed")
-    return {"timestamp": datetime.now().astimezone().isoformat(), "command": command, "rows": rows, "selected": selected[0]}
+    project = _project_gpu2_processes()
+    if require_project_absent and project:
+        raise V9DispatchError("a StateGuard3R/ReCal3R project process is already on GPU 2")
+    return {"timestamp": datetime.now().astimezone().isoformat(), "command": command, "rows": rows, "selected": selected[0], "project_gpu2_processes": project}
 
 
 def _validate_snapshot(snapshot: Mapping[str, Any], *, require_minimum: bool = True) -> None:
@@ -294,6 +369,8 @@ def _validate_snapshot(snapshot: Mapping[str, Any], *, require_minimum: bool = T
         raise V9DispatchError("stored GPU preflight snapshot is invalid")
     if not isinstance(snapshot.get("timestamp"), str) or not snapshot["timestamp"]:
         raise V9DispatchError("stored GPU preflight lacks timestamp")
+    if snapshot.get("project_gpu2_processes") != []:
+        raise V9DispatchError("stored GPU snapshot does not prove project-process absence")
 
 
 def _flag_value(argv: Sequence[str], flag: str) -> str:
@@ -303,6 +380,60 @@ def _flag_value(argv: Sequence[str], flag: str) -> str:
     return argv[indices[0] + 1]
 
 
+def _path_argument(value: str) -> Path:
+    raw = Path(value)
+    return (ROOT / raw).resolve(strict=False) if not raw.is_absolute() else raw.resolve(strict=False)
+
+
+def _production_child_contract(argv: Sequence[str], paths: ArtifactPaths) -> None:
+    """Pin every formal v9 command argument before any GPU inspection."""
+    expected_flags = (
+        "--baseline-root", "--checkpoint", "--checkpoint-sha256", "--input-manifest", "--output-dir",
+        "--device", "--size", "--seed", "--beta-base", "--health-profile", "--rgb-timestamp-listing",
+        "--timestamp-dataset-root", "--state-policy", "--detector-config", "--watchdog",
+    )
+    if len(argv) != 2 + 2 * len(expected_flags) or tuple(argv[2::2]) != expected_flags:
+        raise V9DispatchError("production child argv is not the exact canonical v9 flag order")
+    values = {argv[index]: argv[index + 1] for index in range(2, len(argv), 2)}
+    if _path_argument(values["--baseline-root"]) != RECAL3R_ROOT.resolve(strict=False):
+        raise V9DispatchError("production child baseline root differs")
+    if _path_argument(values["--checkpoint"]) != CHECKPOINT.resolve(strict=False) or values["--checkpoint-sha256"] != CHECKPOINT_SHA256:
+        raise V9DispatchError("production child checkpoint binding differs")
+    manifest = _path_argument(values["--input-manifest"])
+    if manifest not in {path.resolve(strict=False) for path in DEVELOPMENT_MANIFESTS}:
+        raise V9DispatchError("production child manifest is not a pinned development manifest")
+    if values["--output-dir"] != str(paths.output) or values["--device"] != "cuda" or values["--size"] != "512" or values["--seed"] != "0" or values["--beta-base"] != "0.1" or values["--health-profile"] != "v3" or values["--watchdog"] != "8":
+        raise V9DispatchError("production child scalar v9 contract differs")
+    rgb = RECAL3R_ROOT / "data" / "tum" / "rgbd_dataset_freiburg1_desk" / "rgb.txt"
+    timestamp_root = rgb.parent
+    if _path_argument(values["--rgb-timestamp-listing"]) != rgb.resolve(strict=False) or _path_argument(values["--timestamp-dataset-root"]) != timestamp_root.resolve(strict=False):
+        raise V9DispatchError("production child timestamp inputs differ")
+    if _path_argument(values["--detector-config"]) != DETECTOR_CONFIG.resolve(strict=False):
+        raise V9DispatchError("production child Detector-v3 config differs")
+    spec = RUN_SPECS.get(paths.output.name)
+    if spec is None:
+        raise V9DispatchError("production v9 run ID is not pre-registered")
+    condition, expected_policy = spec
+    expected_manifest = ROOT / "outputs" / "formal-v1-inputs-0001" / "development" / f"development-{condition}" / "input-manifest.json"
+    if manifest != expected_manifest.resolve(strict=False) or values["--state-policy"] != expected_policy:
+        raise V9DispatchError("production v9 run ID, manifest, and policy do not match the pre-registration")
+
+
+def _require_gate_b_predecessor(run_id: str) -> None:
+    """Make Gate-B/C ordering executable rather than an advisory document."""
+    if run_id == CONTROL_RUN_ID:
+        return
+    if run_id == CANDIDATE_RUN_ID:
+        paths = artifact_paths(CONTROL_RUN_ID)
+        if _lstat_kind(paths.validator) != "regular" or stat.S_IMODE(paths.validator.stat().st_mode) != 0o444:
+            raise V9DispatchError("dynamic candidate is blocked until the frozen dynamic control validator PASS exists")
+        report = _regular_json(paths.validator, label="frozen dynamic control validator")
+        if report.get("status") != "PASS" or report.get("dynamic_always_control", {}).get("status") != "PASS":
+            raise V9DispatchError("dynamic candidate is blocked because dynamic control did not pass")
+        return
+    raise V9DispatchError("wrong/low v9 runs are blocked until a frozen dynamic candidate Gate-B PASS exists")
+
+
 def _child(argv: Sequence[str], paths: ArtifactPaths, *, test: bool) -> list[str]:
     if not argv or any(type(item) is not str or not item or "\0" in item or "\n" in item or "\r" in item for item in argv):
         raise V9DispatchError("child argv is not a clean nonempty string array")
@@ -310,10 +441,8 @@ def _child(argv: Sequence[str], paths: ArtifactPaths, *, test: bool) -> list[str
         raise V9DispatchError("child has duplicate or missing pinned flags")
     if len(argv) < 2 or argv[1] not in {str(RUNNER_RELATIVE), str(ROOT / RUNNER_RELATIVE)}:
         raise V9DispatchError("child is not the exact pinned v9 runner")
-    if not test:
-        allowed_interpreters = {(ROOT / ".venv" / "bin" / "python").resolve(strict=False), Path(sys.executable).resolve(strict=False)}
-        if Path(argv[0]).resolve(strict=False) not in allowed_interpreters:
-            raise V9DispatchError("production child interpreter is not the pinned StateGuard3R Python")
+    if not test and argv[0] != str(RECAL3R_ROOT / ".venv" / "bin" / "python"):
+        raise V9DispatchError("production child interpreter is not the pinned ReCal3R virtualenv Python")
     output = _flag_value(argv, "--output-dir")
     if output != str(paths.output):
         raise V9DispatchError("child output must be the exact absolute direct run output")
@@ -325,11 +454,25 @@ def _child(argv: Sequence[str], paths: ArtifactPaths, *, test: bool) -> list[str
         raise V9DispatchError("production dispatch requires a CUDA child")
     if test and device not in {"cpu", "cuda"}:
         raise V9DispatchError("test child device must be cpu or cuda")
-    return list(argv)
+    child = list(argv)
+    if not test:
+        _production_child_contract(child, paths)
+        _require_gate_b_predecessor(paths.output.name)
+    return child
 
 
 def _command_hash(argv: Sequence[str]) -> str:
     return hashlib.sha256(json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _interpreter_provenance(argv: Sequence[str], *, test: bool) -> Mapping[str, Any] | None:
+    if test:
+        return None
+    interpreter = Path(argv[0])
+    if _lstat_kind(interpreter) not in {"regular", "symlink"} or not interpreter.exists():
+        raise V9DispatchError("pinned ReCal3R interpreter is unavailable")
+    resolved = interpreter.resolve(strict=True)
+    return {"path": str(interpreter), "resolved_path": str(resolved), "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest()}
 
 
 def _driver(run_id: str, argv: Sequence[str], paths: ArtifactPaths, command_hash: str, quoted: str) -> str:
@@ -560,6 +703,86 @@ def _freeze_primary(paths: ArtifactPaths) -> None:
             _freeze(path)
 
 
+def _regular_json(path: Path, *, label: str) -> Mapping[str, Any]:
+    try:
+        payload = json.loads(_read_regular_nul_free(path, label=label).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise V9DispatchError(f"{label} is not valid UTF-8 JSON") from error
+    if not isinstance(payload, Mapping):
+        raise V9DispatchError(f"{label} must be a JSON object")
+    return payload
+
+
+def _v1_dynamic_runtime() -> float:
+    baseline = _regular_json(V1_DYNAMIC_CONTROL / "run.json", label="frozen v1 dynamic run.json")
+    runtime = baseline.get("runtime_seconds")
+    if type(runtime) not in (int, float) or not math.isfinite(float(runtime)) or not runtime > 0:
+        raise V9DispatchError("frozen v1 dynamic runtime is invalid")
+    return float(runtime)
+
+
+def _validate_dynamic_always_control(paths: ArtifactPaths) -> Mapping[str, Any]:
+    """Verify the pre-registered Gate-B short circuit without using CUDA."""
+    equal: dict[str, bool] = {}
+    digests: dict[str, Mapping[str, str]] = {}
+    for filename in PROTECTED_MODEL_OUTPUTS:
+        baseline = V1_DYNAMIC_CONTROL / filename
+        candidate = paths.output / filename
+        baseline_bytes = _read_regular_nul_free(baseline, label=f"frozen v1 dynamic {filename}")
+        candidate_bytes = _read_regular_nul_free(candidate, label=f"v9 control {filename}")
+        equal[filename] = candidate_bytes == baseline_bytes
+        digests[filename] = {
+            "v1_dynamic_sha256": hashlib.sha256(baseline_bytes).hexdigest(),
+            "v9_control_sha256": hashlib.sha256(candidate_bytes).hexdigest(),
+        }
+    if not all(equal.values()):
+        mismatched = [name for name, matches in equal.items() if not matches]
+        raise V9DispatchError(f"v9 dynamic always-control protected outputs differ from v1: {mismatched}")
+
+    run = _regular_json(paths.output / "run.json", label="v9 control run.json")
+    if run.get("status") != "succeeded" or run.get("state_policy", {}).get("name") != "always-commit":
+        raise V9DispatchError("v9 dynamic always-control run metadata is not an always-commit success")
+    runtime = run.get("runtime_seconds")
+    if type(runtime) not in (int, float) or not math.isfinite(float(runtime)) or not runtime > 0:
+        raise V9DispatchError("v9 dynamic always-control runtime is invalid")
+    baseline_runtime = _v1_dynamic_runtime()
+    ratio = float(runtime) / baseline_runtime
+    if ratio > RUNTIME_RATIO_LIMIT:
+        raise V9DispatchError(f"v9 dynamic always-control runtime ratio exceeds {RUNTIME_RATIO_LIMIT:.2f}: {ratio:.12g}")
+
+    timeline = _regular_json(paths.output / "state-timeline.json", label="v9 control state timeline")
+    transactions = timeline.get("transactions")
+    if timeline.get("policy") != "always-commit" or timeline.get("pending_transaction_count") != 0 or not isinstance(transactions, list) or len(transactions) != 30:
+        raise V9DispatchError("v9 dynamic always-control timeline is not 30 final always-commit transactions")
+    for frame_id, transaction in enumerate(transactions):
+        expected_keys = {"frame_id", "action", "reason", "current_alarm", "consecutive_rollbacks", "pending_transaction_count", "restore_witness", "export_action", "anchor_frame_ids"}
+        if (
+            not isinstance(transaction, Mapping)
+            or set(transaction) != expected_keys
+            or transaction.get("frame_id") != frame_id
+            or transaction.get("action") != "commit"
+            or transaction.get("reason") != "always_commit_control"
+            or transaction.get("current_alarm") is not False
+            or transaction.get("consecutive_rollbacks") != 0
+            or transaction.get("export_action") != "export_real_camera_pose"
+            or transaction.get("pending_transaction_count") != 0
+            or transaction.get("restore_witness") is not None
+            or transaction.get("anchor_frame_ids") is not None
+        ):
+            raise V9DispatchError("v9 dynamic always-control transaction is not final/direct raw control")
+    return {
+        "status": "PASS",
+        "protected_model_outputs_byte_identical": equal,
+        "protected_model_output_sha256": digests,
+        "transaction_count": len(transactions),
+        "pending_transaction_count": timeline["pending_transaction_count"],
+        "runtime_seconds": float(runtime),
+        "v1_dynamic_runtime_seconds": baseline_runtime,
+        "runtime_ratio": ratio,
+        "runtime_ratio_limit": RUNTIME_RATIO_LIMIT,
+    }
+
+
 def _validator_report(paths: ArtifactPaths, *, run_id: str) -> Mapping[str, Any]:
     """Independently recompute the sealed evidence without any CUDA API call."""
     report: dict[str, Any] = {"schema_version": "stateguard3r.v9-validator.v1", "run_id": run_id, "started_at": datetime.now().astimezone().isoformat(), "cpu_only": True}
@@ -583,11 +806,20 @@ def _validator_report(paths: ArtifactPaths, *, run_id: str) -> Mapping[str, Any]
         quoted, command_hash = preflight.get("quoted_command"), preflight.get("command_sha256")
         if not isinstance(quoted, str) or quoted != shlex.join(argv) or command_hash != _command_hash(argv):
             raise V9DispatchError("sealed preflight command/hash does not recompute")
+        test_child = preflight.get("test_child")
+        if type(test_child) is not bool or _child(argv, paths, test=test_child) != argv:
+            raise V9DispatchError("sealed preflight child no longer satisfies its pinned contract")
+        recorded_interpreter = preflight.get("interpreter")
+        if recorded_interpreter != _interpreter_provenance(argv, test=test_child):
+            raise V9DispatchError("sealed production interpreter provenance does not recompute")
         result = _parse_result(paths.result, run_id=run_id, command_hash=command_hash, quoted=quoted)
         _ordered_stream(_read_regular_nul_free(paths.main, label="main"), run_id=run_id, quoted=quoted, command_hash=command_hash, result=result, transcript=False)
         _ordered_stream(_read_regular_nul_free(paths.transcript, label="transcript"), run_id=run_id, quoted=quoted, command_hash=command_hash, result=result, transcript=True)
         if postflight.get("result") != result or not postflight.get("pipe_close_and_drain", {}).get("drained"):
             raise V9DispatchError("sealed postflight does not bind result/pipe drain")
+        if "gpu_postflight_error" in postflight:
+            raise V9DispatchError("sealed postflight lacks a GPU snapshot")
+        _validate_snapshot(postflight.get("gpu_postflight", {}), require_minimum=False)
         pid_check = postflight.get("pid_start_time_check")
         if not isinstance(pid_check, Mapping) or pid_check.get("expected_start_ticks") != result["child_start_ticks"] or pid_check.get("pair_absent") is not True or pid_check.get("pid_reused") is not False:
             raise V9DispatchError("sealed postflight lacks PID/start-time absence proof")
@@ -600,6 +832,8 @@ def _validator_report(paths: ArtifactPaths, *, run_id: str) -> Mapping[str, Any]
             expected_inventory = _output_inventory(paths.output, require_frozen=True)
             if postflight.get("output_inventory") != expected_inventory:
                 raise V9DispatchError("sealed output inventory does not recompute")
+            if run_id == CONTROL_RUN_ID:
+                report["dynamic_always_control"] = _validate_dynamic_always_control(paths)
             terminal_status = "PASS"
         else:
             terminal_status = "CHILD_NONZERO_EVIDENCE_COMPLETE"
@@ -663,7 +897,7 @@ def dispatch(run_id: str, argv: Sequence[str], *, timeout_seconds: float, allow_
             raise V9DispatchError("dispatcher did not obtain exactly two preflights")
         for snapshot in snapshots:
             _validate_snapshot(snapshot)
-        _write_json(paths.preflight, {"schema_version": "stateguard3r.v9-preflight.v2", "run_id": run_id, "command": child, "quoted_command": quoted, "command_sha256": command_hash, "gpu_preflights": snapshots, "source_provenance": source})
+        _write_json(paths.preflight, {"schema_version": "stateguard3r.v9-preflight.v2", "run_id": run_id, "command": child, "quoted_command": quoted, "command_sha256": command_hash, "test_child": allow_noncuda_child_for_test, "interpreter": _interpreter_provenance(child, test=allow_noncuda_child_for_test), "gpu_preflights": snapshots, "source_provenance": source})
         _freeze(paths.preflight)
         _write(paths.main, "")
         _write(paths.transcript, "")
@@ -701,6 +935,9 @@ def dispatch(run_id: str, argv: Sequence[str], *, timeout_seconds: float, allow_
         postflight = dict(_postflight_payload(paths, run_id=run_id, result=result, source=post_source, pipe=pipe, error=None))
         postflight["pid_start_time_check"] = pid_check
         postflight["output_inventory"] = _freeze_output(paths.output) if result["exit_code"] == 0 else None
+        if "gpu_postflight_error" in postflight:
+            raise V9DispatchError("postflight GPU snapshot could not be collected")
+        _validate_snapshot(postflight.get("gpu_postflight", {}), require_minimum=False)
         _write_json(paths.postflight, postflight)
     except Exception as caught:
         error = caught

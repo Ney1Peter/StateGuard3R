@@ -75,6 +75,8 @@ def test_v9_alarm_export_uses_only_pooled_token_and_keeps_raw_input_unmutated() 
     assert action.evidence is not None
     assert action.evidence["token_source"] == TOKEN_SOURCE
     assert action.evidence["preprojection_spatial_token_count"] == 576
+    assert action.evidence["fallback_used"] is False
+    assert action.evidence["no_fallback"] is True
 
 
 def test_v9_alarm_decode_failure_fails_closed_without_raw_fallback_or_mutation() -> None:
