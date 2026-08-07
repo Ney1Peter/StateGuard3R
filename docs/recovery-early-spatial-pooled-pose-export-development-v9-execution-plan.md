@@ -1,80 +1,160 @@
-# Recovery early-spatial-pooled pose export development v9：预注册计划
+# Recovery early-spatial-pooled pose export development v9: execution plan
 
-- 制定日期：2026-08-07
-- 状态：**预注册，尚未实现或运行。**
-- 长时目标：在 12--18 小时内，以正常终态完成所有适用 Gate；不因单次漂亮数值、v8 control 或基础设施错误提前宣布可行。
-- 唯一目标：检验一个与 v8 科学上不同的 early spatial-latent export，能否在不下载数据、仅使用已有三个 development manifests 的条件下，同时满足因果/rollback 安全、normal-path byte equivalence、runtime `<=1.20` 和冻结跨条件质量门。任何硬门失败均诚实发布 v9 NO-GO。
+- Date: 2026-08-07
+- Status: **pre-registered; implementation and GPU execution have not started**
+- Long-horizon objective: within 14--20 hours, run this mechanism through every
+  applicable hard gate with immutable evidence. The research programme advances only
+  when one clean, candidate-ready mechanism satisfies causal safety, normal-path
+  equivalence, per-condition runtime, and frozen quality gates. A v9 failure is a
+  truthful terminal result and requires a mechanism-distinct v10 plan, never a v9 retry.
+- Single v9 objective: determine whether a fixed early spatial-token arithmetic mean can
+  replace an alarm-frame exported pose after rollback without raw pose reuse, fallback,
+  new downloads, or more than 20% recurrent-policy runtime overhead.
 
-## 1. 前置终态与唯一新假设
+## 1. Frozen prior state and distinct hypothesis
 
-v1--v8 全部冻结。特别是 v8 的 special early **pose** token
-`dec[0][:,0:1]` 路线因 Gate-B terminal-evidence/provenance hard stop 结束，不能换一个 run ID、
-index、precision 或 launcher 后重试。
+v1--v8 are frozen. v4 external 3D registration and v5 pointmap consensus exceeded the
+runtime budget. v6 pre-rollout pose retriever query failed the wrong-condition control
+runtime gate. v8 early layer-0 pose token never reached a valid candidate: its Gate-B
+terminal evidence was incomplete and an unauthorized 0001 forward occurred; see
+docs/audits/recovery-early-decoder-pose-export-v8-provenance-no-go.md.
 
-v9 只测试以下不同假设：**同一完整 current recurrent rollout 的 special pose token 可能已带有
-脆弱的 pose/state 通路影响，但早层 spatial patch tokens 的无参数平均
-`mean(dec[0][:,1:], dim=1, keepdim=True)` 保留当前帧几何语境；同一个冻结 pose head 对该 pooled
-spatial latent 的读出可能在 detector alarm 后提供一个不同的 export。**
+v9 tests a different latent source, not a changed index, precision, detector, or retry
+of v8. After the complete current-frame recurrent rollout, dedicated layer-0 pose token
+dec[0][:,0:1] may already carry the pose/state corruption path. The same layer non-pose
+spatial tokens dec[0][:,1:], pooled by one fixed arithmetic mean, retain current-image
+geometry while not reusing the dedicated pose token. A frozen official pose head might
+decode that pooled (1,1,768) latent into a usable alarm export.
 
-这不是 v8 的 layer-index 调整：v8 输入的是一个 special pose token `[:,0:1]`，v9 输入的是排除
-该 pose token 后的整个 spatial token set 的 deterministic aggregate。它仍依赖 current image、current
-rollout 与 committed pre-state，因此不得声称 latent-independent recovery。
+This remains current-image- and model-latent-dependent. It is not latent-independent
+recovery, an independently trained pose estimator, or a claim that it is disconnected
+from the model shared computation.
 
-它不读取 `prediction["camera_pose"]` numeric value、RGB tensor、pointmap、confidence、anchor、GT、
-future frame、ORB/RANSAC、v1--v8 fallback 或 previous export。
+## 2. Immutable v9 mechanism and causal boundary
 
-## 2. 不可变 v9 mechanism
+1. Keep the frozen Detector-v3 decision, raw post-rollout health, complete current-frame
+   structural rollback/witness, watchdog 8, checkpoint, ReCal3R commit
+   466c7cdf3acd2f589f1d82e5f6391966f19db9ff, and the three existing development
+   manifests. The detector always consumes raw prediction; export never feeds model,
+   detector, memory, state, or a later frame.
+2. Candidate only: after _recurrent_rollout returns dec, after a guard confirms that
+   dec[0] has more than one token, and before update_mem with dec[-1][:,0:1], calculate
+   exactly early_spatial_pooled_pose_token =
+   dec[0][:,1:].mean(dim=1,keepdim=True).detach().clone() when observer is present,
+   otherwise None. It has one batch, one token, and width 768. The pool is an unweighted
+   arithmetic mean over every non-pose token in layer 0; no sampling, learned projection,
+   mask, history, cache, or adaptive constant is permitted. Always-control makes no
+   token, mean, observer, or export-wrapper call and retains direct raw to_cpu(res).
+3. Clear frames commit and export their normal raw camera pose. At an alarm, first execute
+   frozen full rollback/witness; only then decode the already captured pooled latent with
+   frozen model.downstream_head.pose_head, official postprocess_pose, and official camera
+   decoder. It replaces only exported camera_pose.
+4. Decoder accepts only the pooled latent, frozen torch/head/postprocess/mode/camera
+   decoder. It rejects malformed/nonfinite/nonfloating (1,1,768) tokens, device mismatch,
+   malformed/nonfinite (1,7) head output, malformed/nonfinite camera, reflection,
+   non-homogeneous row, or determinant/orthogonality error above 1e-8. The head stays in
+   model dtype; only its produced seven values are promoted to float64 on the same GPU
+   before official postprocess/camera. Every failure is
+   EARLY_SPATIAL_POOLED_POSE_UNAVAILABLE_FAIL_CLOSED; no raw pose, hold, motion, anchor,
+   pointmap, retry, or fallback is exported.
+5. Alarm evidence records layer 0, source
+   decoder_layer_0_nonpose_spatial_mean_after_rollout_before_update_mem, arithmetic mean,
+   spatial-token count, shape/dtype/device/GPU digest, source hashes,
+   postprocess/proper-SO3 values, raw/exported pose digests, rollback witness and
+   no-fallback status. Each alarm uses only its own current pooled token.
 
-1. 维持 frozen Detector-v3、raw post-rollout health、current-frame complete rollback/structural witness 与 watchdog `8`。Detector 永远消费 raw prediction；export 不得反馈 model、detector、state、memory 或 later frame。
-2. 每 frame 调用 pinned recurrent lighter body。**仅** candidate observer 存在时，`_recurrent_rollout(...)` 返回 `dec`、decoder length 已验证后、`update_mem(..., dec[-1][:,0:1])` 前，计算并 clone：
+## 3. Data, source, and evaluation boundaries
 
-   ```python
-   early_spatial_pose_token = dec[0][:, 1:].mean(dim=1, keepdim=True).detach().clone()
-   ```
+- Read only the existing manifests:
+  outputs/formal-v1-inputs-0001/development/development-dynamic/input-manifest.json
+  outputs/formal-v1-inputs-0001/development/development-wrong/input-manifest.json
+  outputs/formal-v1-inputs-0001/development/development-low/input-manifest.json
+  Do not download data, checkpoint, dependency, or create a second dataset copy.
+- Do not change ReCal3R, checkpoint, raw RGB, GT, corruption manifests, Detector-v3
+  configuration, formal calibration, or v1--v8 output/log artifacts. Do not read GT or
+  quality artifacts until every v9 control/candidate output is immutable.
+- Add independent v9 primitive/export/runner/script and tests. Do not import or delegate
+  to v1--v8 recovery runners/exporters, ORB/RANSAC, anchor/motion/pointmap solver, or the
+  v6 pose retriever query. Low-level frozen detector, rollback witness and non-policy
+  device utilities may be reused.
+- Pin and hash dust3r/model.py, dpt_head.py, postprocess.py, v9 executable components,
+  checkpoint, manifest and Detector-v3 configuration. Any drift fails closed.
 
-   该值必须是 floating、finite、shape `(1,1,768)` 且在 head device。always-control 不建 token/copy/observer，保持 legacy direct `to_cpu(res)`。
-3. clear frame 原样导出 raw pose。alarm 先按 raw Detector-v3 decision 完成 rollback/witness；随后只将 already-captured v9 token 送入 pinned `DPTPts3dPose.pose_head`、official `postprocess_pose` 和 official camera decoder，并只替换 exported `camera_pose`。不得 retry/re-rollout、cache、copy/hold/motion fallback。
-4. head 在 native model dtype 执行，已得到的 finite `(1,7)` output 在同一 device 升至 float64 后进入 official postprocess/camera path。export pose/camera 必须 finite，camera `(1,4,4)`，bottom row homogeneous，`|det(R)-1|<=1e-8` 与 `max|R^T R-I|<=1e-8`。任何异常为 `EARLY_SPATIAL_POOLED_POSE_UNAVAILABLE_FAIL_CLOSED`，不得回退 raw pose。
-5. 每条 alarm 写 token class `early_spatial_patch_mean`、layer `0`、excluded index `0`、capture relation `after_rollout_before_update_mem`、spatial token count、shape/dtype/device/GPU digest、source hashes、postprocess mode、properness、raw/exported pose digest 与 rollback witness。连续 alarm 只用自身 current token。
+## 4. Terminal-evidence protocol: new v9 launcher
 
-## 3. 不可变数据与执行边界
+The v8 log failure is a process failure, so v9 has one tested, single-owner launcher.
+It must be implemented and tested before any v9 GPU child.
 
-- 仅读取 `outputs/formal-v1-inputs-0001/development/development-{dynamic,wrong,low}/input-manifest.json`。在六个 v9 output 都冻结前，禁止下载 dataset/weight/dependency、读取 GT/logical base/event labels 或运行 quality evaluator。
-- 不修改 ReCal3R/checkpoint/raw RGB/GT/corruption manifests/Detector-v3 config/formal quality artifacts 或 v1--v8 frozen output/log。
-- 新增独立 v9 primitive/exporter/runner/script；不得 import/call v1--v8 recovery runner/exporter、anchor/motion/ORB/pointmap solver。可复用 frozen low-level detector、structural witness、device utility。
-- GPU 仅通过 existing `stateguard` tmux session 的 tracked, test-covered v9 dispatcher 启动；优先 GPU 2 UUID `GPU-d2be321e-2001-7e74-d0f0-3ee103fcd250`，每 run 两次 `>=12288 MiB` preflight。无需 GPU 完全空闲。
+1. Given a one-use run ID, atomically refuse if its direct output, preflight, main,
+   postflight, transcript, driver, result, or validator path already exists. Reject nested
+   or staging output paths.
+2. In the owner process, record exactly two GPU-2 UUID
+   GPU-d2be321e-2001-7e74-d0f0-3ee103fcd250 preflight snapshots. Each must report at least
+   12288 MiB free. Verify preflight is NUL-free, then freeze it 0444.
+3. Create a fresh pane only in existing stateguard tmux session. Establish live pipe-pane
+   to new transcript before dispatch. Pane driver writes V9_DRIVER_START, exact command,
+   child PID and zero/nonzero exit marker; it emits V9_DRIVER_DISPATCHED immediately
+   before CUDA child and writes result only after wait observes child exit.
+4. Same owner, after result and before freezing terminal artifacts, collects timestamped
+   postflight GPU snapshot, records expected child PID absent, result exit, output file
+   modes and clean worktrees. It verifies all newly written
+   preflight/main/postflight/transcript/driver/result bytes NUL-free, then freezes each
+   0444; output root is 0555 and all files 0444.
+5. Separate one-use validator rechecks all evidence, not launcher flags. Missing/ill-ordered
+   markers, snapshot before child finish, stale PID, bad permission/NUL status, path reuse,
+   or missing postflight is terminal v9 provenance failure. It cannot be repaired by manual
+   reconstruction or a recovery ID.
 
-## 4. 单一 dispatch 协议
+Every GPU forward uses CUDA_VISIBLE_DEVICES=2, begins from stateguard, records
+command/PID/GPU/log/output/start/finish, and checks no project process remains on GPU 2.
+No other user process is modified.
 
-每个 authorized run ID 只能有一个 dispatcher owner。该同一 dispatcher 必须按下列不可分的顺序执行：
+## 5. Gate A: code, source, and causal contract
 
-1. 在任何 GPU child 前验证 StateGuard3R/ReCal3R clean、committed components、new output/log/driver/result paths、fixed manifest/checkpoint/config，且记录 two GPU snapshots。
-2. 创建 fresh tmux pane，建立 live `pipe-pane` 到 empty new transcript；随后在 transcript 写 `V9_FORWARD_DISPATCHED`，包含 run ID、quoted command hash 与 child PID，**再**启动 child。
-3. 同一 dispatcher 收集 child stdout/stderr 到 main log，写 immediate postflight（exit code + GPU snapshot），验证 preflight/main/postflight/transcript/driver/result NUL-free 后才冻结全部为 `0444`；成功 output 必须 `0555/0444`。
-4. 一旦写出 `V9_FORWARD_DISPATCHED`，该 ID 和 scientific configuration 永不重复。任何 pre-dispatch failure 也冻结为 failed authorization；v9 不设置事后 recovery-ID branch。candidate validator 必须检查恰有一个 dispatch marker、one output 和全套 canonical artifacts。
+Before GPU execution, separately commit implementation, tests, and Gate-A audit. Require:
 
-这样取消 shell/preflight 与 tmux dispatch 分离造成的模糊状态；不得人工操作 pane 或用事后 addendum 重新解释是否 forward。
+- synthetic identity/translation/rotation pooled-token decode tests; bad token/head/camera,
+  reflection, non-SO3, device and finite failures fail closed;
+- source and AST mutation tests that reject dec[-1], token zero, a non-mean reducer,
+  pooling after update_mem, a control-path clone/observer, raw camera pose/prediction,
+  RGB, pointmap, confidence, anchor/history, GT/future and decoder/export cpu transfer;
+- runner tests proving candidate pool relation, rollback before export, finalization before
+  CPU transfer, raw detector health, watchdog/reset/no leakage and untouched control path;
+- actual existing-checkpoint CPU test of pinned DPT pose head, official postprocess and
+  float64 proper-SO3 contract;
+- unit tests of v9 launcher with non-CUDA child: fresh-path refusal, two preflights,
+  pipe-before-dispatch ordering, child result, child-PID-absent postflight, NUL rejection,
+  freeze ordering, and no manual postflight API;
+- ReCal3R-Torch targeted tests, full CPU suite with repository-local tmp basetemp,
+  compileall, diff check, and clean StateGuard3R/ReCal3R worktrees.
 
-## 5. Gate A：实现与因果合约
+Any Gate-A failure yields EARLY_SPATIAL_POOLED_POSE_EXPORT_V9_IMPLEMENTATION_NO_GO; no v9
+GPU forward is allowed.
 
-GPU 前必须全部通过：
+## 6. Gate B: dynamic short circuit
 
-- token-only synthetic identity/translation/rotation tests；empty spatial set、wrong shape、nonfinite spatial token、nonfinite/malformed head output、head-device mismatch、reflection/non-SO(3)/bad bottom row 全 fail closed；alarm failure 不返回/改变 raw pose；
-- AST/signature tests 拒绝 raw camera-pose/RGB/pointmap/confidence/anchor/history/GT/future/detector input 与 decoder/export math 中 `.cpu()`；audit-only evidence transfer 如存在，必须在 full validation 后且明确区分；
-- source mutations 把 `dec[0]` 改成 `dec[-1]`、`[:,1:]` 改成 `[:,0:1]`、mean 移至 `update_mem` 后、或移除 `keepdim=True` 均 fail；runner tests 证明 control 没有 clone/observer/finalize，candidate captures before update and finalizes after rollback before CPU transfer；
-- actual checkpoint-loaded `DPTPts3dPose` CPU check、ReCal3R Torch targeted tests、full project CPU suite（`--basetemp` 在 repository `tmp/`）、compileall、diff check；code/tests/docs 分离提交，两个 worktree clean；
-- dispatcher unit tests 覆盖 exact one-use lease、two snapshots、pipe-before-marker-before-child、no-forward preflight failure、nonzero child、missing/NUL/mismatched artifact 与 no manually reconstructed transcript。
+1. Once only run recovery-early-spatial-pooled-pose-v9-dynamic-always-commit-0001. Its four
+   protected files must be byte-identical to frozen v1 dynamic baseline; status succeeds;
+   timeline is final/direct; policy is always-commit with 30 transactions and zero pending;
+   all provenance/permissions pass; runtime/baseline is at most 1.20.
+2. Only after independent control validation passes, once only run
+   recovery-early-spatial-pooled-pose-v9-dynamic-candidate-0001. Every real alarm must
+   have full rollback witness, pooled-token export action, matching current-frame
+   source/count evidence, no fallback and valid SO3; runtime/baseline is at most 1.20.
+3. A control, candidate, availability, runtime, or terminal-evidence failure is
+   EARLY_SPATIAL_POOLED_POSE_EXPORT_V9_AVAILABILITY_OR_RUNTIME_NO_GO. Do not run
+   wrong/low/GT and do not change v9 pool/source/head/precision/detector/logging then retry.
 
-任一失败是 `EARLY_SPATIAL_POOLED_POSE_EXPORT_V9_IMPLEMENTATION_NO_GO`，不得启动 GPU。
+## 7. Gate C: frozen cross-condition matrix and blind quality selection
 
-## 6. Gate B：dynamic short circuit
+Only Gate-B PASS permits exactly: wrong control, wrong candidate, low control, low
+candidate. Each uses a new ID, full terminal-evidence validation and same runtime at most
+1.20 gate. All six v9 outputs freeze before CPU evaluator reads logical-base GT.
 
-1. 只运行一次 `recovery-early-spatial-pooled-pose-v9-dynamic-always-commit-0001`。四个 protected files 必须相对 frozen v1 dynamic baseline byte-identical，runtime/baseline `<=1.20`，并通过 v9 dispatcher validator。
-2. 仅在第 1 步 PASS 后，运行一次 `recovery-early-spatial-pooled-pose-v9-dynamic-candidate-0001`。每个 real alarm 必须 rollback/full witness、`export_early_spatial_pooled_pose_token`、complete evidence、zero fallback，且 runtime/baseline `<=1.20`。
-3. 任一失败即 `EARLY_SPATIAL_POOLED_POSE_EXPORT_V9_AVAILABILITY_OR_RUNTIME_NO_GO`；不得重试、跑 wrong/low/GT evaluator，或调整 pool/index/precision/head/detector。
-
-## 7. Gate C：冻结 matrix 与质量选择
-
-仅 Gate B PASS 授权各一次：wrong control/candidate，随后 low control/candidate。六个 v9 outputs 完全冻结后，CPU evaluator 才可读取 logical-base GT，并用 frozen prefix `0--14` Sim(3)、tail `19--29` ATE/RPE 与 `(baseline-candidate)/baseline` 计算效果。
-
-candidate-ready 需要：所有 control protected files byte-identical；所有 alarm complete；零 restore/token/watchdog/leakage/dispatcher failure；至少 2/3 条件同时 ATE 与 translation-RPE 为正；两项 median 均 `>=+5%`；candidate runtime median `<=1.20`；全部 provenance/freeze permissions 完整。PASS 只写未执行的 blind acquisition plan `EARLY_SPATIAL_POOLED_POSE_EXPORT_V9_CANDIDATE_READY`；否则为 `EARLY_SPATIAL_POOLED_POSE_EXPORT_V9_FEASIBILITY_NO_GO` 并结束 v9。
+Evaluator uses frozen prefix frames 0--14 for Sim(3), tail 19--29 for ATE/RPE, and
+(baseline-candidate)/baseline. Candidate-ready requires every control byte-equivalent,
+all alarms complete, zero restore/query/watchdog/leakage failure, at least two of three
+conditions with both ATE and translation-RPE improvement, both medians at least +5%,
+candidate runtime median at most 1.20, and complete immutable provenance. PASS writes
+only unexecuted blind acquisition plan. Otherwise write
+EARLY_SPATIAL_POOLED_POSE_EXPORT_V9_FEASIBILITY_NO_GO and stop v9 without retuning.
