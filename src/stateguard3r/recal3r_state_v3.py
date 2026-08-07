@@ -314,6 +314,25 @@ class CausalHoldReplayController:
         return result
 
 
+class CausalHoldDiscardController(CausalHoldReplayController):
+    """Development-only counterpart that releases held candidates by discard.
+
+    It preserves the parent controller's causal alarm, pending bound and
+    candidate-decision rules.  The sole semantic difference is that a clear
+    frame removes the newest held candidate without reinstalling its post-state.
+    The caller records that removal explicitly.
+    """
+
+    def take_discard(self, frame_id: int) -> StateTransaction | None:
+        """Return the held transaction being discarded after a clear score."""
+
+        if not self._pending or self.prior_alarm(frame_id):
+            return None
+        transaction = self._pending[-1]
+        self._pending.clear()
+        return transaction
+
+
 def _git_output(repository: Path, *arguments: str) -> str:
     completed = subprocess.run(
         ["git", "-C", str(repository), *arguments],
@@ -370,6 +389,7 @@ def canonical_digest(payload: Mapping[str, Any]) -> str:
 
 
 __all__ = [
+    "CausalHoldDiscardController",
     "CausalHoldReplayController",
     "MODEL_CONFIG_ATTRIBUTES",
     "MODEL_MUTABLE_ATTRIBUTES",

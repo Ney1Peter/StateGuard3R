@@ -33,6 +33,11 @@ import scripts.run_recal3r_smoke as smoke
 
 
 STATE_POLICY_SCHEMA_VERSION = "stateguard3r.recal3r-state-policy-v3.v1"
+DEVELOPMENT_INPUT_ROOT = REPOSITORY_ROOT / "outputs" / "formal-v1-inputs-0001" / "development"
+DISCARD_POLICIES = {
+    "forced-prior-alarm-discard",
+    "detector-v3-quality-prior-alarm-discard",
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -44,8 +49,10 @@ def _parser() -> argparse.ArgumentParser:
         choices=(
             "always-commit",
             "forced-prior-alarm",
+            "forced-prior-alarm-discard",
             "detector-v3-prior-alarm",
             "detector-v3-quality-prior-alarm",
+            "detector-v3-quality-prior-alarm-discard",
         ),
         required=True,
         help="always-commit is the equivalence control; detector-v3-prior-alarm consumes frozen v3 alarms",
@@ -113,13 +120,13 @@ def _validate_policy_args(args: argparse.Namespace, parser: argparse.ArgumentPar
             parser.error("--alarm-frame is valid only with an alarm-driven policy")
         if any(path is not None for path in detector_paths) or quality_artifact is not None:
             parser.error("detector source arguments are valid only with --state-policy detector-v3-prior-alarm")
-    if args.state_policy == "forced-prior-alarm":
+    if args.state_policy in {"forced-prior-alarm", "forced-prior-alarm-discard"}:
         if not args.alarm_frame:
-            parser.error("forced-prior-alarm requires at least one --alarm-frame")
+            parser.error("forced alarm policy requires at least one --alarm-frame")
         if any(frame < 0 for frame in args.alarm_frame):
             parser.error("--alarm-frame must be non-negative")
         if any(path is not None for path in detector_paths) or quality_artifact is not None:
-            parser.error("forced-prior-alarm may not use detector source arguments")
+            parser.error("forced alarm policy may not use detector source arguments")
     if args.state_policy == "detector-v3-prior-alarm":
         if args.alarm_frame:
             parser.error("detector-v3-prior-alarm derives alarms from frozen evidence; do not pass --alarm-frame")
@@ -127,11 +134,32 @@ def _validate_policy_args(args: argparse.Namespace, parser: argparse.ArgumentPar
             parser.error("detector-v3-prior-alarm requires --detector-run-json and --detector-alarm-timeline")
         if quality_artifact is not None:
             parser.error("detector-v3-prior-alarm may not use --quality-alarm-artifact")
-    if args.state_policy == "detector-v3-quality-prior-alarm":
+    if args.state_policy in {"detector-v3-quality-prior-alarm", "detector-v3-quality-prior-alarm-discard"}:
         if args.alarm_frame or any(path is not None for path in detector_paths):
-            parser.error("detector-v3-quality-prior-alarm accepts only --quality-alarm-artifact")
+            parser.error("quality detector policy accepts only --quality-alarm-artifact")
         if quality_artifact is None:
-            parser.error("detector-v3-quality-prior-alarm requires --quality-alarm-artifact")
+            parser.error("quality detector policy requires --quality-alarm-artifact")
+
+
+def _validate_development_discard_manifest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Keep the experimental discard implementation outside formal evidence."""
+
+    if args.state_policy not in DISCARD_POLICIES:
+        return
+    if getattr(args, "recovery_quality_commitment", None) is not None:
+        parser.error("development discard policy may not consume a recovery-quality commitment")
+    manifest = args.input_manifest.resolve(strict=True)
+    development_root = DEVELOPMENT_INPUT_ROOT.resolve(strict=True)
+    if development_root not in manifest.parents:
+        parser.error(f"development discard policy only accepts manifests under {development_root}")
+    try:
+        payload = json.loads(manifest.read_bytes())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        parser.error(f"cannot parse development discard manifest: {error}")
+    if not isinstance(payload, dict) or payload.get("schema_version") != "stateguard3r.corruption.v1":
+        parser.error("development discard policy requires a legacy stateguard3r.corruption.v1 manifest")
+    if payload.get("source_is_read_only") is not True:
+        parser.error("development discard policy requires a read-only source manifest")
 
 
 def _frozen_json(path: Path, *, label: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -287,6 +315,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     _validate_policy_args(args, parser)
     smoke._validate_args(args, parser)
+    _validate_development_discard_manifest(args, parser)
     runner_provenance = _self_provenance()
     forward = (
         "always-commit"
@@ -403,7 +432,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     model._compute_recal3r_update_mask = counted_update
     alarms = [False] * len(views)
     alarm_source: dict[str, Any] | None = None
-    if args.state_policy == "forced-prior-alarm":
+    if args.state_policy in {"forced-prior-alarm", "forced-prior-alarm-discard"}:
         for frame in args.alarm_frame:
             if frame >= len(views):
                 parser.error(f"--alarm-frame {frame} is outside {len(views)} frames")
@@ -412,7 +441,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         alarms, alarm_source = _detector_v3_alarms(args)
         if len(alarms) != len(views):
             raise RuntimeError("frozen detector alarm count does not equal state-policy input frame count")
-    elif args.state_policy == "detector-v3-quality-prior-alarm":
+    elif args.state_policy in {"detector-v3-quality-prior-alarm", "detector-v3-quality-prior-alarm-discard"}:
         alarms, alarm_source = _quality_v1_alarms(args)
         if len(alarms) != len(views):
             raise RuntimeError("quality detector alarm count does not equal state-policy input frame count")
@@ -434,6 +463,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             canonicalize_model_update_type=dust3r_model_module.canonicalize_model_update_type,
             alarms=alarms,
             max_hold=args.max_hold,
+            release_mode="discard" if args.state_policy in DISCARD_POLICIES else "replay",
         ),
     )
     if device.type == "cuda":
@@ -507,6 +537,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "source_provenance": result.source_provenance,
         "transactions": result.timeline,
         "dropped_transaction_frame_ids": result.dropped_transaction_frame_ids,
+        "discarded_transaction_frame_ids": result.discarded_transaction_frame_ids,
+        "release_mode": result.release_mode,
     }
     smoke._write_json_atomic(args.output_dir / "state-timeline.json", timeline_payload)
     run_finished_at = datetime.now().astimezone().isoformat()
@@ -545,6 +577,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "state_policy": {
             "name": args.state_policy,
             "max_hold": args.max_hold,
+            "release_mode": result.release_mode,
             "alarm_positions": [index for index, value in enumerate(alarms) if value],
             "causality": "decision_for_frame_t_reads_only_alarm_t_minus_1",
             "timeline_path": str(args.output_dir / "state-timeline.json"),

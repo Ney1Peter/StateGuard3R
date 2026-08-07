@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
 from .recal3r_state_v3 import (
+    CausalHoldDiscardController,
     CausalHoldReplayController,
     StateClosure,
     StateTransaction,
@@ -46,6 +47,8 @@ class TransactionalReCal3RResult:
     state_closures: list[StateClosure]
     timeline: list[Mapping[str, Any]]
     dropped_transaction_frame_ids: list[int]
+    discarded_transaction_frame_ids: list[int]
+    release_mode: str
     source_provenance: Mapping[str, Any]
 
 
@@ -56,6 +59,7 @@ def _timeline_entry(
     reason: str,
     prior_alarm: bool,
     replayed_transaction_frame_id: int | None,
+    discarded_transaction_frame_id: int | None,
     committed_state: StateClosure,
 ) -> dict[str, Any]:
     transaction_digest = transaction.digest()
@@ -65,6 +69,7 @@ def _timeline_entry(
         "reason": reason,
         "prior_alarm": prior_alarm,
         "replayed_transaction_frame_id": replayed_transaction_frame_id,
+        "discarded_transaction_frame_id": discarded_transaction_frame_id,
         "proposal_digest_sha256": canonical_digest(transaction_digest),
         "pre_state_digest_sha256": canonical_digest(transaction.pre_state.digest()),
         "proposed_state_digest_sha256": canonical_digest(transaction.post_state.digest()),
@@ -83,6 +88,7 @@ def run_transactional_recurrent_lighter(
     canonicalize_model_update_type: Callable[[Any], str],
     alarms: Sequence[bool],
     max_hold: int = 3,
+    release_mode: str = "replay",
     verify_source: bool = True,
 ) -> TransactionalReCal3RResult:
     """Run the hash-bound lighter path with causal transactional state control.
@@ -98,7 +104,13 @@ def run_transactional_recurrent_lighter(
     if len(alarms) != len(views):
         raise TransactionalReCal3RError("alarm count must equal view count")
     source_provenance = verify_pinned_lighter_source() if verify_source else {}
-    controller = CausalHoldReplayController(alarms, max_hold=max_hold)
+    if release_mode not in {"replay", "discard"}:
+        raise TransactionalReCal3RError("release_mode must be 'replay' or 'discard'")
+    controller = (
+        CausalHoldReplayController(alarms, max_hold=max_hold)
+        if release_mode == "replay"
+        else CausalHoldDiscardController(alarms, max_hold=max_hold)
+    )
 
     # The following recurrent calculation mirrors pinned source lines
     # 1661--1833.  Transaction capture/restore is the only new control flow.
@@ -109,13 +121,16 @@ def run_transactional_recurrent_lighter(
     ress: list[Mapping[str, Any]] = []
     state_closures: list[StateClosure] = []
     timeline: list[Mapping[str, Any]] = []
+    discarded_transaction_frame_ids: list[int] = []
     reset_mask: Any = False
     if model._uses_update_pressure_update() and hasattr(model, "update_pressure"):
         del model.update_pressure
 
     for i, _view in enumerate(views):
-        replayed = controller.take_replay(i)
+        replayed = controller.take_replay(i) if release_mode == "replay" else None
+        discarded = controller.take_discard(i) if release_mode == "discard" else None
         replayed_transaction_frame_id: int | None = None
+        discarded_transaction_frame_id: int | None = None
         if replayed is not None:
             replayed.post_model.restore(model, torch=torch)
             (
@@ -127,6 +142,12 @@ def run_transactional_recurrent_lighter(
             ) = replayed.post_state.restored()
             reset_mask = _clone_reset_mask(replayed.post_reset_mask)
             replayed_transaction_frame_id = replayed.frame_id
+        if discarded is not None:
+            # The state remains at the last safe closure.  The already-emitted
+            # held-frame prediction is retained and explicitly accounted for;
+            # it is never backfilled from a later frame.
+            discarded_transaction_frame_id = discarded.frame_id
+            discarded_transaction_frame_ids.append(discarded.frame_id)
 
         view = to_gpu(_view, device)
         device = view["img"].device
@@ -278,6 +299,9 @@ def run_transactional_recurrent_lighter(
         if replayed_transaction_frame_id is not None:
             timeline_action = f"release_replay_then_{decision.action}"
             timeline_reason = f"released_held_frame_{replayed_transaction_frame_id};{decision.reason}"
+        if discarded_transaction_frame_id is not None:
+            timeline_action = f"release_discard_then_{decision.action}"
+            timeline_reason = f"discarded_held_frame_{discarded_transaction_frame_id};{decision.reason}"
         timeline.append(
             _timeline_entry(
                 transaction,
@@ -285,6 +309,7 @@ def run_transactional_recurrent_lighter(
                 reason=timeline_reason,
                 prior_alarm=decision.prior_alarm,
                 replayed_transaction_frame_id=replayed_transaction_frame_id,
+                discarded_transaction_frame_id=discarded_transaction_frame_id,
                 committed_state=committed_state,
             )
         )
@@ -297,6 +322,8 @@ def run_transactional_recurrent_lighter(
         state_closures=state_closures,
         timeline=timeline,
         dropped_transaction_frame_ids=[transaction.frame_id for transaction in dropped],
+        discarded_transaction_frame_ids=discarded_transaction_frame_ids,
+        release_mode=release_mode,
         source_provenance=source_provenance,
     )
 
