@@ -287,9 +287,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.device == "cuda":
         torch.cuda.manual_seed_all(args.seed)
     # The official loader used by ``_prepare_input_views`` imports dust3r, so
-    # its pinned source root must be visible before any model-ready RGB is read.
-    if str(args.baseline_root) not in sys.path:
-        sys.path.insert(0, str(args.baseline_root))
+    # both ReCal3R's helper root and its pinned ``src`` tree must be visible
+    # before any model-ready RGB is read.
+    for source_root in (args.baseline_root, args.baseline_src):
+        if str(source_root) not in sys.path:
+            sys.path.insert(0, str(source_root))
     smoke._verify_preflight_inputs(args)
     views = smoke._prepare_input_views(args, torch)
     captures, capture_provenance = capture_timestamp_records(
