@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from stateguard3r.recal3r_state_v3 import (
+    CausalHoldDiscardController,
     CausalHoldReplayController,
     StateClosure,
     StateTransaction,
@@ -141,6 +142,17 @@ def test_hold_controller_enforces_the_declared_three_update_bound() -> None:
     assert controller.decide_candidate(_transaction(4)).action == "hold"
     bounded = controller.decide_candidate(_transaction(5))
     assert (bounded.action, bounded.reason) == ("commit", "hold_bound_reached")
+    assert controller.drain() == []
+
+
+def test_discard_controller_releases_a_held_candidate_without_replay() -> None:
+    controller = CausalHoldDiscardController([False, True, False, False], max_hold=3)
+    assert controller.decide_candidate(_transaction(0)).action == "commit"
+    assert controller.decide_candidate(_transaction(1)).action == "commit"
+    held = _transaction(2)
+    assert controller.decide_candidate(held).action == "hold"
+    assert controller.take_discard(2) is None
+    assert controller.take_discard(3) == held
     assert controller.drain() == []
 
 

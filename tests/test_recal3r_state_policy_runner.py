@@ -10,10 +10,12 @@ import sys
 import pytest
 
 from scripts.run_recal3r_state_policy_v3 import (
+    DISCARD_POLICIES,
     _detector_v3_alarms,
     _parser,
     _quality_v1_alarms,
     _run_without_grad,
+    _validate_development_discard_manifest,
     _validate_policy_args,
 )
 from stateguard3r.recal3r_transactional_v3 import (
@@ -32,6 +34,7 @@ def _policy_args(**overrides: object) -> argparse.Namespace:
         "detector_alarm_timeline": None,
         "quality_alarm_artifact": None,
         "recovery_quality_commitment": None,
+        "input_manifest": None,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -57,6 +60,16 @@ def test_state_policy_parser_defaults_to_v2_and_accepts_control_modes() -> None:
             state_policy="detector-v3-prior-alarm",
             detector_run_json=Path("run.json"),
             detector_alarm_timeline=Path("timeline.json"),
+        ),
+        parser,
+    )
+    _validate_policy_args(
+        _policy_args(state_policy="forced-prior-alarm-discard", alarm_frame=[1]), parser
+    )
+    _validate_policy_args(
+        _policy_args(
+            state_policy="detector-v3-quality-prior-alarm-discard",
+            quality_alarm_artifact=Path("alarm.json"),
         ),
         parser,
     )
@@ -139,6 +152,39 @@ def test_transactional_runner_rejects_misaligned_alarm_sequence_before_execution
             canonicalize_model_update_type=lambda value: str(value),
             alarms=[],
             verify_source=False,
+        )
+
+
+def test_development_discard_manifest_is_schema_and_root_guarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import scripts.run_recal3r_state_policy_v3 as runner
+
+    development = tmp_path / "development"
+    manifest = development / "dynamic" / "input-manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        json.dumps(
+            {"schema_version": "stateguard3r.corruption.v1", "source_is_read_only": True}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runner, "DEVELOPMENT_INPUT_ROOT", development)
+    args = _policy_args(state_policy="forced-prior-alarm-discard", alarm_frame=[1], input_manifest=manifest)
+
+    _validate_development_discard_manifest(args, _parser())
+
+    assert args.state_policy in DISCARD_POLICIES
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"schema_version": "stateguard3r.corruption.v1", "source_is_read_only": True}), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        _validate_development_discard_manifest(
+            _policy_args(
+                state_policy="forced-prior-alarm-discard",
+                alarm_frame=[1],
+                input_manifest=outside,
+            ),
+            _parser(),
         )
 
 
