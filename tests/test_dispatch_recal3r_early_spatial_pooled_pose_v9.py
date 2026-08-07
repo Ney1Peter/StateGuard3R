@@ -5,7 +5,9 @@ import json
 import os
 from pathlib import Path
 import shlex
+import subprocess
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -48,10 +50,22 @@ def _markers(run_id: str, argv: list[str]) -> str:
         f"V9_DRIVER_START run_id={run_id}",
         f"V9_DRIVER_COMMAND={shlex.join(argv)}",
         f"V9_DRIVER_COMMAND_SHA256={result['command_sha256']}",
-        f"V9_DRIVER_DISPATCHED run_id={run_id}",
+        f"V9_DRIVER_DISPATCHED run_id={run_id} kind=wrapper_only",
         f"V9_DRIVER_CHILD_PID run_id={run_id} child_pid=731 child_start_ticks=123456",
         f"V9_DRIVER_EXIT run_id={run_id} child_pid=731 child_start_ticks=123456 exit_code=0 reaped_at=2026-08-07T22:00:00+08:00",
         f"V9_DRIVER_RESULT_WRITTEN run_id={run_id} child_pid=731 child_start_ticks=123456 exit_code=0",
+        "",
+    ))
+
+
+def _preexec_markers(run_id: str, argv: list[str], *, child_pid: int = 731) -> str:
+    command_hash = dispatch._command_hash(argv)
+    return "\n".join((
+        f"V9_DRIVER_START run_id={run_id}",
+        f"V9_DRIVER_COMMAND={shlex.join(argv)}",
+        f"V9_DRIVER_COMMAND_SHA256={command_hash}",
+        f"V9_DRIVER_DISPATCHED run_id={run_id} kind=wrapper_only",
+        f"V9_DRIVER_PREEXEC_IDENTITY_FAILURE run_id={run_id} child_pid={child_pid} reason=start_time_unavailable exit_code=72",
         "",
     ))
 
@@ -73,12 +87,121 @@ def test_canonical_paths_refuse_preexisting_artifact_and_atomic_lease(tmp_path: 
 def test_driver_is_direct_child_writer_without_process_substitution_tees(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _root(tmp_path, monkeypatch)
     paths, argv = dispatch.artifact_paths(RUN_ID), _argv(root)
-    source = dispatch._driver(RUN_ID, argv, paths, dispatch._command_hash(argv), shlex.join(argv))
+    source = dispatch._driver(RUN_ID, argv, paths, dispatch._command_hash(argv), shlex.join(argv), "a" * 64)
     assert '>> "$main_log" 2>&1 &' in source
     assert "> >(" not in source
     assert "V9_DRIVER_DISPATCHED" in source
     assert "V9_DRIVER_CHILD_PID" in source
+    assert "V9_DRIVER_PAYLOAD_RELEASE_ARMED" in source
+    assert "cmp -s - \"$go_path\"" in source
     assert "V9_DRIVER_RESULT_WRITTEN" in source
+
+
+def test_real_bash_driver_releases_payload_only_after_a_valid_two_phase_identity_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
+    paths = dispatch.artifact_paths(RUN_ID)
+    dispatch._acquire_lease(paths)
+    dispatch._write(paths.main, "")
+    payload, sentinel = tmp_path / "payload.sh", tmp_path / "payload-executed"
+    payload.write_text(f"#!/usr/bin/env bash\nprintf 'payload\n' > {shlex.quote(str(sentinel))}\n", encoding="utf-8")
+    payload.chmod(0o755)
+    argv, token = [str(payload)], "b" * 64
+    dispatch._write(paths.driver, dispatch._driver(RUN_ID, argv, paths, dispatch._command_hash(argv), shlex.join(argv), token), 0o555)
+    completed = subprocess.run(["bash", str(paths.driver)], text=True, capture_output=True, timeout=5)
+    assert completed.returncode == 0, completed.stderr
+    assert sentinel.read_text(encoding="utf-8") == "payload\n"
+    result = dispatch._parse_result(paths.result, run_id=RUN_ID, command_hash=dispatch._command_hash(argv), quoted=shlex.join(argv))
+    assert result["exit_code"] == 0
+    assert (paths.lease / "child-go").read_text(encoding="utf-8") == token + "\n"
+    main = paths.main.read_text(encoding="utf-8")
+    assert main.index("V9_DRIVER_CHILD_PID") < main.index("V9_DRIVER_PAYLOAD_RELEASE_ARMED") < main.index("V9_DRIVER_EXIT")
+    assert "V9_DRIVER_PREEXEC_IDENTITY_FAILURE" not in main
+
+
+def test_real_bash_driver_rejects_an_authorized_prefix_with_extra_gate_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
+    paths = dispatch.artifact_paths(RUN_ID)
+    dispatch._acquire_lease(paths)
+    dispatch._write(paths.main, "")
+    payload, sentinel = tmp_path / "payload.sh", tmp_path / "payload-executed"
+    payload.write_text(f"#!/usr/bin/env bash\nprintf 'payload\n' > {shlex.quote(str(sentinel))}\n", encoding="utf-8")
+    payload.chmod(0o755)
+    argv, token = [str(payload)], "f" * 64
+    # A same-ID race must not turn a token-looking prefix into a launch.  The
+    # complete file differs from the one whose digest is later attested.
+    (paths.lease / "child-go").write_text(token + "\nunrecorded-suffix\n", encoding="utf-8")
+    dispatch._write(paths.driver, dispatch._driver(RUN_ID, argv, paths, dispatch._command_hash(argv), shlex.join(argv), token), 0o555)
+    completed = subprocess.run(["bash", str(paths.driver)], text=True, capture_output=True, timeout=5)
+    assert completed.returncode == 70
+    assert not sentinel.exists() and not paths.result.exists()
+    failure = dispatch._preexec_identity_failure(paths.main, run_id=RUN_ID)
+    assert failure is not None and failure["reason"] in {"parent_start_time_mismatch", "go_gate_create_failed"}
+    assert f"V9_DRIVER_PAYLOAD_RELEASED run_id={RUN_ID}" not in paths.main.read_text(encoding="utf-8")
+
+
+def test_real_bash_driver_start_time_failure_never_executes_payload_or_creates_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
+    paths = dispatch.artifact_paths(RUN_ID)
+    dispatch._acquire_lease(paths)
+    dispatch._write(paths.main, "")
+    payload, sentinel, fake_bin = tmp_path / "payload.sh", tmp_path / "payload-executed", tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    payload.write_text(f"#!/usr/bin/env bash\nprintf 'payload\n' > {shlex.quote(str(sentinel))}\n", encoding="utf-8")
+    payload.chmod(0o755)
+    fake_awk = fake_bin / "awk"
+    fake_awk.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    fake_awk.chmod(0o755)
+    argv = [str(payload)]
+    dispatch._write(paths.driver, dispatch._driver(RUN_ID, argv, paths, dispatch._command_hash(argv), shlex.join(argv), "c" * 64), 0o555)
+    environment = dict(os.environ)
+    environment["PATH"] = str(fake_bin) + ":/usr/bin:/bin"
+    completed = subprocess.run(["bash", str(paths.driver)], text=True, capture_output=True, timeout=5, env=environment)
+    assert completed.returncode == 70
+    assert not sentinel.exists() and not paths.result.exists() and not (paths.lease / "child-go").exists()
+    failure = dispatch._preexec_identity_failure(paths.main, run_id=RUN_ID)
+    assert failure is not None and failure["reason"] == "start_time_unavailable"
+    assert (paths.lease / "child-start").read_text(encoding="utf-8") == f"FAIL {failure['child_pid']} unavailable\n"
+
+
+def test_preexec_stream_allows_a_failed_token_write_only_when_no_release_marker_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
+    paths, argv = dispatch.artifact_paths(RUN_ID), _argv(root)
+    failure = {"run_id": RUN_ID, "child_pid": 731, "reason": "go_gate_create_failed", "exit_code": 1}
+    command_hash, quoted = dispatch._command_hash(argv), shlex.join(argv)
+    stream = "\n".join((
+        f"V9_DRIVER_START run_id={RUN_ID}",
+        f"V9_DRIVER_COMMAND={quoted}",
+        f"V9_DRIVER_COMMAND_SHA256={command_hash}",
+        f"V9_DRIVER_DISPATCHED run_id={RUN_ID} kind=wrapper_only",
+        f"V9_DRIVER_CHILD_PID run_id={RUN_ID} child_pid=731 child_start_ticks=123456",
+        f"V9_DRIVER_PAYLOAD_RELEASE_ARMED run_id={RUN_ID} child_pid=731 child_start_ticks=123456",
+        f"V9_DRIVER_PREEXEC_IDENTITY_FAILURE run_id={RUN_ID} child_pid=731 reason=go_gate_create_failed exit_code=1",
+        "",
+    ))
+    assert dispatch._preexec_identity_failure(Path(root / "logs" / "unused"), run_id=RUN_ID) is None
+    paths.main.write_text(stream, encoding="utf-8")
+    assert dispatch._preexec_identity_failure(paths.main, run_id=RUN_ID) == failure
+    dispatch._ordered_preexec_stream(
+        stream.encode(), run_id=RUN_ID, quoted=quoted, command_hash=command_hash,
+        failure=failure, transcript=False, ready_start_ticks="123456",
+    )
+    paths.main.write_text(stream + f"V9_DRIVER_PAYLOAD_RELEASED run_id={RUN_ID} child_pid=731 child_start_ticks=123456\n", encoding="utf-8")
+    with pytest.raises(dispatch.V9DispatchError, match="payload release"):
+        dispatch._preexec_identity_failure(paths.main, run_id=RUN_ID)
+
+
+def test_lease_contents_and_mutated_frozen_driver_are_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
+    paths, argv = dispatch.artifact_paths(RUN_ID), _argv(root)
+    dispatch._acquire_lease(paths)
+    (paths.lease / "child-go").symlink_to(root / "logs" / "outside")
+    with pytest.raises(dispatch.V9DispatchError, match="not empty"):
+        dispatch._require_empty_lease(paths)
+    (paths.lease / "child-go").unlink()
+    token, command_hash, quoted = "e" * 64, dispatch._command_hash(argv), shlex.join(argv)
+    paths.driver.write_text(dispatch._driver(RUN_ID, argv, paths, command_hash, quoted, token) + "# altered\n", encoding="utf-8")
+    with pytest.raises(dispatch.V9DispatchError, match="differs"):
+        dispatch._validate_frozen_driver(paths, run_id=RUN_ID, argv=argv, command_hash=command_hash, quoted=quoted)
 
 
 def test_dispatch_orders_pipe_before_driver_and_seals_original_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -273,6 +396,73 @@ def test_missing_pipe_ready_never_sends_driver_or_starts_child(tmp_path: Path, m
     for path in (paths.preflight, paths.main, paths.transcript, paths.driver, paths.postflight):
         assert path.exists() and (path.stat().st_mode & 0o777) == 0o444
     assert not paths.result.exists()
+
+
+def test_dispatch_detects_preexec_no_go_immediately_and_freezes_no_result_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
+    paths, argv, events = dispatch.artifact_paths(RUN_ID), _argv(root), []
+    source = {"stateguard_commit": "commit", "recal3r_commit": "baseline", "component_sha256": {}, "external_sha256": {}}
+    snapshot = {"timestamp": "2026-08-07T22:00:00+08:00", "selected": {"uuid": dispatch.GPU_UUID, "memory_free_mib": dispatch.MIN_FREE_MIB}, "rows": [], "project_gpu2_processes": []}
+    monkeypatch.setattr(dispatch, "_component_provenance", lambda: source)
+    monkeypatch.setattr(dispatch, "_snapshot", lambda **_kwargs: snapshot)
+    monkeypatch.setattr(dispatch, "_pane", lambda: "%42")
+    monkeypatch.setattr(dispatch, "_pane_alive", lambda _pane: False)
+    validator_calls: list[str] = []
+    monkeypatch.setattr(dispatch, "_run_independent_validator", lambda value: validator_calls.append(value) or {"status": "PREEXEC_IDENTITY_NO_GO_EVIDENCE_COMPLETE"})
+
+    def fake_tmux(args: list[str], **_kwargs: object) -> SimpleNamespace:
+        if args[0] == "pipe-pane":
+            events.append("pipe")
+        elif args[0] == "send-keys":
+            command = args[3]
+            if "V9_PIPE_READY" in command:
+                events.append("ready")
+                paths.transcript.write_text(f"V9_PIPE_READY run_id={RUN_ID}\n", encoding="utf-8")
+            else:
+                events.append("driver")
+                evidence = _preexec_markers(RUN_ID, argv)
+                paths.main.write_text(evidence, encoding="utf-8")
+                paths.transcript.write_text(paths.transcript.read_text(encoding="utf-8") + evidence, encoding="utf-8")
+                (paths.lease / "child-start").write_text("FAIL 731 unavailable\n", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr(dispatch, "_tmux", fake_tmux)
+    started = time.monotonic()
+    with pytest.raises(dispatch.V9DispatchError, match="before payload release"):
+        dispatch.dispatch(RUN_ID, argv, timeout_seconds=30, allow_noncuda_child_for_test=True)
+    assert time.monotonic() - started < 1.0
+    assert events == ["pipe", "ready", "driver"] and validator_calls == [RUN_ID]
+    assert not paths.result.exists() and not paths.output.exists()
+    for path in (paths.preflight, paths.main, paths.postflight, paths.transcript, paths.driver):
+        assert (path.stat().st_mode & 0o777) == 0o444
+    postflight = json.loads(paths.postflight.read_text(encoding="utf-8"))
+    assert postflight["preexec_no_go"]["terminal_kind"] == "PREEXEC_IDENTITY_NO_GO"
+    assert postflight["preexec_no_go"]["go_gate_authorized"] is False
+
+
+def test_validator_accepts_only_the_frozen_complete_preexec_no_go_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _root(tmp_path, monkeypatch)
+    paths, argv = dispatch.artifact_paths(RUN_ID), _argv(root)
+    source = {"stateguard_commit": "commit", "recal3r_commit": "baseline", "component_sha256": {}, "external_sha256": {}}
+    snapshot = {"timestamp": "2026-08-07T22:00:00+08:00", "selected": {"uuid": dispatch.GPU_UUID, "memory_free_mib": dispatch.MIN_FREE_MIB}, "rows": [], "project_gpu2_processes": []}
+    monkeypatch.setattr(dispatch, "_component_provenance", lambda: source)
+    monkeypatch.setattr(dispatch, "_snapshot", lambda **_kwargs: snapshot)
+    dispatch._acquire_lease(paths)
+    command_hash, quoted, token = dispatch._command_hash(argv), shlex.join(argv), "d" * 64
+    failure = {"run_id": RUN_ID, "child_pid": 731, "reason": "start_time_unavailable", "exit_code": 72}
+    dispatch._write_json(paths.preflight, {"schema_version": "stateguard3r.v9-preflight.v2", "run_id": RUN_ID, "command": argv, "quoted_command": quoted, "command_sha256": command_hash, "test_child": True, "interpreter": None, "gpu_preflights": [snapshot, snapshot], "source_provenance": source})
+    dispatch._write(paths.main, _preexec_markers(RUN_ID, argv))
+    dispatch._write(paths.transcript, f"V9_PIPE_READY run_id={RUN_ID}\n" + _preexec_markers(RUN_ID, argv))
+    dispatch._write(paths.driver, dispatch._driver(RUN_ID, argv, paths, command_hash, quoted, token), 0o555)
+    (paths.lease / "child-start").write_text("FAIL 731 unavailable\n", encoding="utf-8")
+    postflight = dispatch._postflight_payload(paths, run_id=RUN_ID, result=None, source=source, pipe={"drained": True, "pane_alive_at_close": False}, error="PREEXEC_IDENTITY_NO_GO", preexec_failure=failure, go_token_sha256=hashlib.sha256((token + "\n").encode("ascii")).hexdigest())
+    dispatch._write_json(paths.postflight, postflight)
+    for path in (paths.preflight, paths.main, paths.transcript, paths.driver, paths.postflight):
+        dispatch._freeze(path)
+    report = dispatch.validate_sealed_run(RUN_ID)
+    assert report["status"] == "PREEXEC_IDENTITY_NO_GO_EVIDENCE_COMPLETE"
+    assert report["payload_not_executed"] is True
+    assert (paths.validator.stat().st_mode & 0o777) == 0o444
 
 
 def test_validator_output_inventory_is_read_only_and_rejects_mutable_or_symlinked_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
