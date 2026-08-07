@@ -90,11 +90,11 @@ def _before(overlap: Any, original_before: Any) -> Any:
 def main(argv: Sequence[str] | None = None) -> int:
     # v3's runner is source-bound and generic over its observer.  The temporary
     # substitutions are process-local and restored even if v4 fails closed.
-    old = (v3._parser, v3._validate_args, v3._V3Observer, v3.SCHEMA_VERSION, v3.v2._OnlineOverlap, v3._self_provenance)
+    old = (v3._parser, v3._validate_args, v3._V3Observer, v3.SCHEMA_VERSION, v3.v2._OnlineOverlap, v3.v2._self_provenance)
     class _Overlap(v3.v2._OnlineOverlap):
         pass
     try:
-        v3._parser, v3._validate_args, v3._V3Observer, v3.SCHEMA_VERSION, v3._self_provenance = _parser, _validate, _V4Observer, SCHEMA_VERSION, _self_provenance
+        v3._parser, v3._validate_args, v3._V3Observer, v3.SCHEMA_VERSION, v3.v2._self_provenance = _parser, _validate, _V4Observer, SCHEMA_VERSION, _self_provenance
         original_init, original_before = _Overlap.__init__, _Overlap.before_frame
         def init(self: Any) -> None:
             original_init(self)
@@ -103,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         v3.v2._OnlineOverlap = _Overlap
         return v3.main(argv)
     finally:
-        v3._parser, v3._validate_args, v3._V3Observer, v3.SCHEMA_VERSION, v3.v2._OnlineOverlap, v3._self_provenance = old
+        v3._parser, v3._validate_args, v3._V3Observer, v3.SCHEMA_VERSION, v3.v2._OnlineOverlap, v3.v2._self_provenance = old
 
 
 if __name__ == "__main__":
