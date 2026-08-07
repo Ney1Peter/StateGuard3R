@@ -1,7 +1,7 @@
 # Recovery geometric-registration export development v4：因果点云定位计划
 
 - 制定日期：2026-08-07
-- 状态：**执行中（独立于已完成 v1/v2/v3）**
+- 状态：**已完成 — `GEOMETRIC_REGISTRATION_EXPORT_V4_AVAILABILITY_OR_RUNTIME_NO_GO`**
 - 计划窗口：12--18 小时；以全部预注册门禁的正常结束状态为终点
 - 前置结论：v3 的 state isolation、runtime 和 output fallback 均可行，但固定 SE(3) motion extrapolation 只改善
   low-overlap，不能跨 corruption 改善；因此 v4 不得复用或调整任何 pose hold/CV/delta/anchor-length fallback。
@@ -89,3 +89,13 @@ RPE、两项中位数 `>=+5%`、candidate runtime median `<=1.20`、零 restore/
 全部通过才得到 `GEOMETRIC_REGISTRATION_EXPORT_V4_CANDIDATE_READY` 并只写未执行的新的 blind acquisition plan；否则
 为 `GEOMETRIC_REGISTRATION_EXPORT_V4_FEASIBILITY_NO_GO`。NO-GO 也完成 v4；后续必须再提出不同机制，不能将开发集
 变成 registration 参数搜索集。
+
+## 6. 已执行结论
+
+Gate A 已通过；当前 clean commit 的 dynamic always control `...0004` 也通过四个 protected artifact 的
+byte-equivalence、runtime 与 final timeline-path provenance。唯一 dynamic candidate `...0001` 的 15--20 六个
+真实 alarm 均具有完整 rollback、固定 anchor 14、proper SO(3) 与 registration witness，因此 availability 本身通过。
+但 candidate/baseline runtime 为 `16.037689845077693 / 3.4633694058284163 = 4.6306610603`，超过不可变的
+`1.20` 门限。因此按 Gate B 的短路规则，wrong/low 与任何 quality evaluator 都未执行；唯一有效结论为
+`GEOMETRIC_REGISTRATION_EXPORT_V4_AVAILABILITY_OR_RUNTIME_NO_GO`。详见
+`docs/audits/recovery-geometric-registration-export-development-v4-result.md`。

@@ -1874,6 +1874,24 @@ launched or created.
   No v3 blind-test acquisition/commitment is authorized; a follow-up may not select another pose fallback from these
   disclosed numbers.
 
+### RECOVERY-GEOMETRIC-REGISTRATION-EXPORT-DEVELOPMENT-V4-0001: anchor ORB--3D3D export
+
+- Status: **completed — `GEOMETRIC_REGISTRATION_EXPORT_V4_AVAILABILITY_OR_RUNTIME_NO_GO`**.
+- Scope: only the disclosed v1 development dynamic manifest reached Gate B; no downloads, ReCal3R changes, frozen
+  recovery-quality rereads, wrong/low forwards, development quality evaluator or blind acquisition occurred.
+- Accepted control: `outputs/recovery-geometric-registration-v4-dynamic-always-commit-0004`, frozen `0555/0444`;
+  protected four artifacts are byte-identical to v1 dynamic baseline, runtime ratio is `1.0812338085`, and final
+  direct-child timeline provenance is valid. The older `...0003` remains frozen but is rejected because its metadata
+  points at a moved staging path.
+- Candidate: `outputs/recovery-geometric-registration-v4-dynamic-candidate-0001`, frozen `0555/0444`; six alarms
+  at 15--20 each rollback correctly and export a proper 3D registration from unchanged real-safe anchor 14. Minimum
+  finite pairs/inliers are 70/29, maximum normalized residual is 0.0268972, and no restore or registration failure
+  occurred.
+- Decision fact: candidate/baseline runtime is `4.6306610603` (limit 1.20), even though geometry availability passed.
+  The short-circuit rule prohibits wrong/low and quality runs. GPU 2 L20 preflight/free-memory and exit evidence are
+  in `logs/recovery-geometric-registration-v4-dynamic-*`.
+- Audit: [recovery-geometric-registration-export-development-v4-result.md](../audits/recovery-geometric-registration-export-development-v4-result.md).
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
