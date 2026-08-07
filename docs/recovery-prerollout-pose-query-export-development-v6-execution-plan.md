@@ -33,7 +33,9 @@ RGB tensor、pointmap、confidence、history anchor、GT、future frame、ORB、
    `model.downstream_head.pose_head(...)`，再调用 pinned `dust3r.heads.postprocess.postprocess_pose(..., pose_mode)`，写回
    exported prediction 的唯一字段 `camera_pose`。没有 raw pose numerical input、copy/hold/motion fallback 或 candidate retry。
 4. token 必须 shape `(1,1,768)`（以 pinned model audit 的 decoder dimension `768` 绑定）、finite、与 pose head 同 device；
-   pose-head output/postprocess result 必须 shape `(1,7)` 且 finite。对 exported encoding 调用 pinned
+   pose-head output/postprocess result 必须 shape `(1,7)` 且 finite。冻结 pose head 仍在其原 model dtype 上执行；仅将其已得的
+   7 个输出在同一 device 确定性提升为 `float64` 后，调用同一 pinned postprocess/camera decoder。这是为使 quaternion 到 matrix
+   的数值 proper-SO(3) 检查达到下述已冻结 `1e-8` 精度，不改变 token、head 权重或姿态估计机制，也不引入第二个估计器。对 exported encoding 调用 pinned
    `pose_encoding_to_camera`，结果必须 finite homogeneous 4 x 4 proper SO(3)（`|det(R)-1|<=1e-8`、
    `max|R^T R-I|<=1e-8`）。任一异常为 `PRE_ROLLOUT_POSE_QUERY_UNAVAILABLE_FAIL_CLOSED`，不得导出 raw pose。
 5. 每条 alarm transaction 写 query source (`pose_retriever.inquire` 或 frame-0 `pose_token`)、token shape/dtype/device digest、
