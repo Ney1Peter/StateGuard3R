@@ -14,6 +14,7 @@ RANSAC_HYPOTHESES = 256
 SAMPLE_SIZE = 3
 MIN_FINITE_PAIRS = 24
 MIN_INLIERS = 16
+MIN_INLIER_CENTERED_RANK = 3
 NORMALIZED_INLIER_LIMIT = 0.05
 SCALE_FLOOR = 1e-3
 
@@ -58,6 +59,20 @@ def _proper_transform(current: np.ndarray, anchor: np.ndarray) -> np.ndarray:
     return result
 
 
+def _require_full_rank_inliers(current: np.ndarray, anchor: np.ndarray) -> None:
+    """Require a volumetric refined cloud after a non-collinear 3-point draw.
+
+    A centered set of exactly three points has rank at most two, so RANSAC
+    hypotheses use the separate non-collinearity check in ``_proper_transform``.
+    The predeclared rank-three constraint is applied to the final >=16-inlier
+    cloud, where it is both meaningful and necessary for a stable 3D pose.
+    """
+    if np.linalg.matrix_rank(current - current.mean(axis=0), tol=1e-10) < MIN_INLIER_CENTERED_RANK:
+        raise GeometricRegistrationError("refined current inlier cloud lacks centered rank 3")
+    if np.linalg.matrix_rank(anchor - anchor.mean(axis=0), tol=1e-10) < MIN_INLIER_CENTERED_RANK:
+        raise GeometricRegistrationError("refined anchor inlier cloud lacks centered rank 3")
+
+
 def register_anchor_to_current(anchor_points: Any, current_points: Any) -> RegistrationResult:
     """Estimate the fixed current-self -> anchor-reference transform.
 
@@ -89,6 +104,7 @@ def register_anchor_to_current(anchor_points: Any, current_points: Any) -> Regis
             best = candidate
     if best is None or best[0] < MIN_INLIERS:
         raise GeometricRegistrationError("3D registration has fewer than 16 inliers")
+    _require_full_rank_inliers(current[best[3]], anchor[best[3]])
     transform = _proper_transform(current[best[3]], anchor[best[3]])
     residuals = np.linalg.norm(current @ transform[:3, :3].T + transform[:3, 3] - anchor, axis=1)
     mask = residuals <= limit
@@ -100,4 +116,4 @@ def register_anchor_to_current(anchor_points: Any, current_points: Any) -> Regis
     return RegistrationResult(transform, mask, scale, normalized)
 
 
-__all__ = ["GeometricRegistrationError", "MIN_FINITE_PAIRS", "MIN_INLIERS", "NORMALIZED_INLIER_LIMIT", "RANSAC_HYPOTHESES", "RANSAC_SEED", "RegistrationResult", "register_anchor_to_current"]
+__all__ = ["GeometricRegistrationError", "MIN_FINITE_PAIRS", "MIN_INLIER_CENTERED_RANK", "MIN_INLIERS", "NORMALIZED_INLIER_LIMIT", "RANSAC_HYPOTHESES", "RANSAC_SEED", "RegistrationResult", "register_anchor_to_current"]
