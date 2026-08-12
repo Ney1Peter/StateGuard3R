@@ -49,7 +49,8 @@ Clear frames return the original raw mapping.
 | Item | Value |
 | --- | --- |
 | StateGuard3R implementation/probe source commit | `d0ffade640c7a106357c85aea11c8aa60c4d5a5d` |
-| Post-probe probe-argument hardening commit | `5f67a6fa9564255376f8771cc5a3c350c678a42d` |
+| Post-probe fixed run-ID hardening commit | `5f67a6fa9564255376f8771cc5a3c350c678a42d` |
+| Post-audit evidence-target hardening commit | `b70300e` (this amendment's parent) |
 | ReCal3R commit | `466c7cdf3acd2f589f1d82e5f6391966f19db9ff` |
 | checkpoint SHA-256 | `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103` |
 | `dust3r/model.py` SHA-256 | `32785a6f29fded66aa142207b29a33d7522f0c39aa068fe2175a956ec8dbc3c1` |
@@ -99,11 +100,11 @@ with the project virtualenv and CUDA disabled: **592 passed, 62 skipped in
 57.72 s**.  Its skips are the existing no-Torch cases; the v12 Torch tests are
 covered by the targeted invocation above.
 
-The real, one-frame, CUDA-disabled v12 probe was confirmed from the committed
+The real, one-frame, CUDA-disabled v12 probe ran from the committed
 implementation source with `CUDA_VISIBLE_DEVICES=''`, existing
 dynamic-development manifest frame 0 and the existing checkpoint. Its
-immutable, mode-0444 committed-source confirmation evidence is
-[`recovery-patch-embed-global-pooled-pose-v12-dynamic-frame0-cpu-probe-0002.json`](../../logs/recovery-patch-embed-global-pooled-pose-v12-dynamic-frame0-cpu-probe-0002.json).
+immutable, mode-0444 canonical evidence is
+[`recovery-patch-embed-global-pooled-pose-v12-dynamic-frame0-cpu-probe-0001.json`](../../logs/recovery-patch-embed-global-pooled-pose-v12-dynamic-frame0-cpu-probe-0001.json).
 It records:
 
 | Contract | Observed result |
@@ -122,6 +123,23 @@ The probe hard-blocks `_encode_image`, encoder blocks/RoPE, retriever
 inquire/update/memory, recurrence, detector, GT and future-frame paths.
 Therefore it proves the required native pre-RoPE availability path rather than
 an in-memory substitute or a shortened full inference.
+
+### Evidence-target hardening amendment
+
+The original CPU probe fixed the payload `run_id`, but accepted an arbitrary
+new direct `--evidence-json` path.  A second, otherwise identical
+CUDA-disabled confirmation was therefore written at a noncanonical `0002`
+filename while its payload truthfully retained run ID `0001`.  It is not
+used as an additional experiment or authorization.  No GPU, candidate,
+development matrix, GT, extra frame, download or modified upstream source was
+involved, and it did not read any prior probe output.
+
+Commit `b70300e` closes that artifact-path ambiguity before any Gate-B work:
+the probe now rejects any evidence path other than the canonical
+`logs/<RUN_ID>.json`, before importing torch or touching data.  The original
+canonical `0001` artifact remains the sole Gate-A runtime evidence.  The
+second file is retained only under the repository's two-phase evidence
+preservation rule and must not be interpreted as a separate run.
 
 ## Authorized next action and irreversible stop rules
 
