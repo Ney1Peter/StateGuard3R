@@ -72,7 +72,10 @@ class PatchEmbedGlobalPooledPoseExport:
             )
         except PatchEmbedGlobalPooledPoseError as error:
             raise PatchEmbedGlobalPooledPoseExportError(f"patch-global alarm export unavailable: {error}") from error
-        exported = dict(prediction)
+        # The raw pose is deliberately never loaded on an alarm.  Iterating
+        # keys and filtering before value access preserves every non-pose
+        # prediction field while quarantining its numeric camera value.
+        exported = {key: prediction[key] for key in prediction if key != "camera_pose"}
         exported["camera_pose"] = decoded.pose
         self._next_frame += 1
         return exported, PatchEmbedGlobalPooledPoseAction(frame_id, "export_patch_embed_global_pose", self._evidence(decoded, capture))
