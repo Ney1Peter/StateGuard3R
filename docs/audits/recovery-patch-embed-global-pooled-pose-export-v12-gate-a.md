@@ -51,6 +51,7 @@ Clear frames return the original raw mapping.
 | StateGuard3R implementation/probe source commit | `d0ffade640c7a106357c85aea11c8aa60c4d5a5d` |
 | Post-probe fixed run-ID hardening commit | `5f67a6fa9564255376f8771cc5a3c350c678a42d` |
 | Post-audit evidence-target hardening commit | `b70300e` (this amendment's parent) |
+| tmux waiter / dispatcher-provenance commits | `53a6d9a`, `8e09a42` |
 | ReCal3R commit | `466c7cdf3acd2f589f1d82e5f6391966f19db9ff` |
 | checkpoint SHA-256 | `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103` |
 | `dust3r/model.py` SHA-256 | `32785a6f29fded66aa142207b29a33d7522f0c39aa068fe2175a956ec8dbc3c1` |
@@ -157,6 +158,13 @@ with at least 12288 MiB free and no project process.  The independent CPU
 validator must prove 30 direct commits/pending zero, runtime/v1 `<=1.20`, and
 byte-identical v1 dynamic `checkpoint-load-audit.json`, `health.jsonl`,
 `predictions-summary.json` and `trajectory.json`.
+
+`scripts/wait_and_dispatch_recal3r_patch_embed_global_pooled_pose_v12_control.sh`
+is the only permitted non-model waiting wrapper: it merely polls, waits 30 s,
+then requires the same free-memory threshold again before calling the
+dispatcher.  Its blob is included in the dispatcher's pinned component
+provenance, so any later modification makes Gate B fail closed.  It does not
+reserve a GPU or override the dispatcher's own two snapshots.
 
 Only a frozen PASS permits exactly one v12 dynamic candidate.  Any control or
 candidate failure is terminal
