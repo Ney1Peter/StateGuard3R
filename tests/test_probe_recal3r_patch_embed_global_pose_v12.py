@@ -128,6 +128,17 @@ def test_v12_probe_requires_explicit_cuda_disable_without_importing_torch(
     probe._require_cuda_disabled_environment()
 
 
+def test_v12_probe_run_id_is_fixed_before_any_model_work() -> None:
+    parser = probe._parser()
+    assert parser.parse_args([
+        "--baseline-root", "/tmp/base", "--checkpoint", "/tmp/checkpoint",
+        "--checkpoint-sha256", "x", "--input-manifest", "/tmp/manifest",
+        "--evidence-json", "/tmp/evidence",
+    ]).run_id == probe.RUN_ID
+    with pytest.raises(RuntimeError, match="fixed and one-use"):
+        probe._require_fixed_run_id("recovery-patch-embed-global-pooled-pose-v12-dynamic-frame0-cpu-probe-0002")
+
+
 def test_v12_probe_requires_exact_pinned_patch_embed_and_pose_head_interfaces() -> None:
     class _PatchEmbed:
         pass

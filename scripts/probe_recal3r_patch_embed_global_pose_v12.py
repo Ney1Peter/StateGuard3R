@@ -67,6 +67,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint-sha256", required=True)
     parser.add_argument("--input-manifest", required=True, type=Path)
     parser.add_argument("--evidence-json", required=True, type=Path)
+    parser.add_argument("--run-id", default=RUN_ID)
     parser.add_argument("--seed", type=int, default=0)
     return parser
 
@@ -75,6 +76,12 @@ def _require_cuda_disabled_environment() -> None:
     """Require an explicit CUDA-disabled process before importing torch."""
     if os.environ.get("CUDA_VISIBLE_DEVICES") != "":
         raise RuntimeError("v12 CPU probe requires CUDA_VISIBLE_DEVICES='' before torch import")
+
+
+def _require_fixed_run_id(value: Any) -> str:
+    if type(value) is not str or value != RUN_ID:
+        raise RuntimeError("v12 CPU probe run id is fixed and one-use")
+    return value
 
 
 def _exact_dynamic_frame_zero(manifest: Path) -> tuple[Path, Mapping[str, Any]]:
@@ -190,6 +197,7 @@ def _require_cpu_tensor(value: Any, *, name: str) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    _require_fixed_run_id(args.run_id)
     _require_cuda_disabled_environment()
     baseline_root = args.baseline_root.resolve(strict=True)
     baseline_src = (baseline_root / "src").resolve(strict=True)
@@ -293,7 +301,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # completed before constructing or writing the immutable evidence payload.
     payload = {
         "schema_version": "stateguard3r.v12-cpu-patch-embed-probe.v1",
-        "run_id": RUN_ID,
+        "run_id": args.run_id,
         "status": "passed",
         "started_at": started_at,
         "finished_at": datetime.now().astimezone().isoformat(),
