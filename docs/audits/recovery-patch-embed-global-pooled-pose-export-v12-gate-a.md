@@ -52,6 +52,7 @@ Clear frames return the original raw mapping.
 | Post-probe fixed run-ID hardening commit | `5f67a6fa9564255376f8771cc5a3c350c678a42d` |
 | Post-audit evidence-target hardening commit | `b70300e` (this amendment's parent) |
 | tmux waiter / dispatcher-provenance commits | `53a6d9a`, `8e09a42` |
+| waiter static-contract test commit | `a061491` |
 | ReCal3R commit | `466c7cdf3acd2f589f1d82e5f6391966f19db9ff` |
 | checkpoint SHA-256 | `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103` |
 | `dust3r/model.py` SHA-256 | `32785a6f29fded66aa142207b29a33d7522f0c39aa068fe2175a956ec8dbc3c1` |
@@ -165,6 +166,10 @@ then requires the same free-memory threshold again before calling the
 dispatcher.  Its blob is included in the dispatcher's pinned component
 provenance, so any later modification makes Gate B fail closed.  It does not
 reserve a GPU or override the dispatcher's own two snapshots.
+
+After adding that waiter, its isolated shell/route test passed (`1 passed`):
+it checks shell syntax, fixed run/GPU IDs, both free-memory reads, clean
+worktree checks, canonical always-control argv and sole dispatcher entrypoint.
 
 Only a frozen PASS permits exactly one v12 dynamic candidate.  Any control or
 candidate failure is terminal
