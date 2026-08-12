@@ -175,6 +175,9 @@ reserve a GPU or override the dispatcher's own two snapshots.
 After adding that waiter, its isolated shell/route test passed (`1 passed`):
 it checks shell syntax, fixed run/GPU IDs, both free-memory reads, clean
 worktree checks, canonical always-control argv and sole dispatcher entrypoint.
+An additional CPU-only preflight against the final HEAD recomputed the six
+pinned component hashes (including the waiter) and accepted the exact
+production control argv (`v12_dispatcher_production_contract=PASS`).
 
 Only a frozen PASS permits exactly one v12 dynamic candidate.  Any control or
 candidate failure is terminal
