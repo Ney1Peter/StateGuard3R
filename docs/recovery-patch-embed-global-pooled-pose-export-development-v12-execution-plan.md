@@ -1,8 +1,11 @@
 # Recovery patch-embedding global pooled pose export v12: execution plan
 
 - Date: 2026-08-07
-- Status: **pre-registered; no v12 implementation, CUDA run, output, or quality
-  evaluation exists**
+- Status: **Gate A PASS at commit `a472c6a`; no v12 CUDA run, development
+  output, candidate, quality evaluation or new data acquisition exists.**  The
+  only currently authorized forward is the dynamic always-control, pending its
+  strict GPU-2 availability gate.  See
+  [`audits/recovery-patch-embed-global-pooled-pose-export-v12-gate-a.md`](audits/recovery-patch-embed-global-pooled-pose-export-v12-gate-a.md).
 - Long-horizon objective (12–18 hours of active work): determine whether a
   current-frame, pre-RoPE patch-embedding global latent can safely replace an
   alarm-frame exported camera pose, while preserving baseline state semantics,
