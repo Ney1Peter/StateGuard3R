@@ -255,6 +255,7 @@ def test_v12_dispatcher_owns_only_the_preregistered_patch_embed_route() -> None:
     assert dispatch.CANDIDATE_RUN_ID == "recovery-patch-embed-global-pooled-pose-v12-dynamic-candidate-0001"
     assert dispatch.CANDIDATE_POLICY == "detector-v3-incremental-patch-embed-global-pooled-pose-export"
     assert dispatch.RUNNER_RELATIVE == Path("scripts/run_recal3r_patch_embed_global_pooled_pose_export_v12.py")
+    assert Path("scripts/wait_and_dispatch_recal3r_patch_embed_global_pooled_pose_v12_control.sh") in dispatch.PINNED_COMPONENTS
     assert "dispatch_recal3r_encoder_global_pooled_pose_v11" not in source
     assert "dispatch_recal3r_early_spatial_pooled_pose_v9" not in source
     assert "importlib" not in source

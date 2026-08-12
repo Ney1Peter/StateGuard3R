@@ -41,6 +41,7 @@ PINNED_COMPONENTS = (
     Path("src/stateguard3r/patch_embed_global_pooled_pose_export_v12.py"),
     Path("src/stateguard3r/patch_embed_global_pooled_pose_v12.py"),
     Path("scripts/dispatch_recal3r_patch_embed_global_pooled_pose_v12.py"),
+    Path("scripts/wait_and_dispatch_recal3r_patch_embed_global_pooled_pose_v12_control.sh"),
 )
 RECAL3R_ROOT = ROOT.parent / "baselines" / "ReCal3R"
 RECAL3R_COMMIT = "466c7cdf3acd2f589f1d82e5f6391966f19db9ff"
