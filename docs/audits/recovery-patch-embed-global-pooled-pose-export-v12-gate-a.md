@@ -102,11 +102,11 @@ ran with the project virtualenv and CUDA disabled: **593 passed, 62 skipped in
 58.45 s**. Its skips are the existing no-Torch cases; the v12 Torch tests are
 covered by the targeted invocation above.
 
-The real, one-frame, CUDA-disabled v12 probe ran from the committed
-implementation source with `CUDA_VISIBLE_DEVICES=''`, existing
-dynamic-development manifest frame 0 and the existing checkpoint. Its
-immutable, mode-0444 canonical evidence is
-[`recovery-patch-embed-global-pooled-pose-v12-dynamic-frame0-cpu-probe-0001.json`](../../logs/recovery-patch-embed-global-pooled-pose-v12-dynamic-frame0-cpu-probe-0001.json).
+The Gate-A real-frame availability proof ran from committed implementation
+source `d0ffade` with `CUDA_VISIBLE_DEVICES=''`, existing dynamic-development
+manifest frame 0 and the existing checkpoint. Its immutable, mode-0444
+evidence is
+[`recovery-patch-embed-global-pooled-pose-v12-dynamic-frame0-cpu-probe-0002.json`](../../logs/recovery-patch-embed-global-pooled-pose-v12-dynamic-frame0-cpu-probe-0002.json).
 It records:
 
 | Contract | Observed result |
@@ -128,20 +128,25 @@ an in-memory substitute or a shortened full inference.
 
 ### Evidence-target hardening amendment
 
-The original CPU probe fixed the payload `run_id`, but accepted an arbitrary
-new direct `--evidence-json` path.  A second, otherwise identical
-CUDA-disabled confirmation was therefore written at a noncanonical `0002`
-filename while its payload truthfully retained run ID `0001`.  It is not
-used as an additional experiment or authorization.  No GPU, candidate,
-development matrix, GT, extra frame, download or modified upstream source was
-involved, and it did not read any prior probe output.
+The initial `0001` probe was a preliminary run made before the implementation
+files were committed; it is retained under the two-phase evidence-preservation
+rule but is **not** used to authorize Gate B.  The CPU-probe implementation at
+`d0ffade` fixed the payload `run_id`, but accepted an arbitrary new direct
+`--evidence-json` path.  The committed-source availability proof was therefore
+written at the noncanonical `0002` filename while its payload truthfully
+retained the fixed logical run ID `0001`.  The v12 Gate-A plan has no
+exactly-once CPU-forward rule; this is the single committed-source proof used
+for authorization, not a candidate or a development-matrix experiment. No
+GPU, candidate, GT, extra frame, download or modified upstream source was
+involved, and it did not read either prior probe output.
 
 Commit `b70300e` closes that artifact-path ambiguity before any Gate-B work:
 the probe now rejects any evidence path other than the canonical
-`logs/<RUN_ID>.json`, before importing torch or touching data.  The original
-canonical `0001` artifact remains the sole Gate-A runtime evidence.  The
-second file is retained only under the repository's two-phase evidence
-preservation rule and must not be interpreted as a separate run.
+`logs/<RUN_ID>.json`, before importing torch or touching data. The committed
+source `0002` artifact remains the Gate-A runtime evidence; the preliminary
+`0001` file and noncanonical filename are retained only under the repository's
+two-phase evidence-preservation rule and must not be interpreted as separate
+authorized experiments.
 
 ## Authorized next action and irreversible stop rules
 
