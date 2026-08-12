@@ -97,9 +97,9 @@ covering atomic lease, UUID/memory snapshots, pipe-ready ordering, full-byte
 release token, PID/start-time ownership, freeze, validator and pre-execution
 identity NO-GO terminal evidence.
 
-`compileall` and `git diff --check` passed.  The full project CPU suite ran
-with the project virtualenv and CUDA disabled: **592 passed, 62 skipped in
-57.72 s**.  Its skips are the existing no-Torch cases; the v12 Torch tests are
+`compileall` and `git diff --check` passed. The final full project CPU suite
+ran with the project virtualenv and CUDA disabled: **593 passed, 62 skipped in
+58.45 s**. Its skips are the existing no-Torch cases; the v12 Torch tests are
 covered by the targeted invocation above.
 
 The real, one-frame, CUDA-disabled v12 probe ran from the committed
