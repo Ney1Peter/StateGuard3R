@@ -137,6 +137,11 @@ def test_v12_probe_run_id_is_fixed_before_any_model_work() -> None:
     ]).run_id == probe.RUN_ID
     with pytest.raises(RuntimeError, match="fixed and one-use"):
         probe._require_fixed_run_id("recovery-patch-embed-global-pooled-pose-v12-dynamic-frame0-cpu-probe-0002")
+    assert probe._require_fixed_evidence_path(
+        probe.ROOT / "logs" / f"{probe.RUN_ID}.json"
+    ) == probe.ROOT / "logs" / f"{probe.RUN_ID}.json"
+    with pytest.raises(RuntimeError, match="fixed and one-use"):
+        probe._require_fixed_evidence_path(probe.ROOT / "logs" / "alternate.json")
 
 
 def test_v12_probe_requires_exact_pinned_patch_embed_and_pose_head_interfaces() -> None:

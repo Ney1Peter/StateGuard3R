@@ -154,6 +154,13 @@ def _write_immutable_json(path: Path, payload: Mapping[str, Any]) -> None:
             pass
 
 
+def _require_fixed_evidence_path(value: Path) -> Path:
+    expected = ROOT / "logs" / f"{RUN_ID}.json"
+    if value.resolve(strict=False) != expected.resolve(strict=False):
+        raise RuntimeError("v12 CPU probe evidence path is fixed and one-use")
+    return expected
+
+
 def _prohibited(name: str) -> Any:
     def blocked(*_args: Any, **_kwargs: Any) -> Any:
         raise AssertionError(f"v12 CPU probe called prohibited path: {name}")
@@ -198,6 +205,7 @@ def _require_cpu_tensor(value: Any, *, name: str) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     _require_fixed_run_id(args.run_id)
+    _require_fixed_evidence_path(args.evidence_json)
     _require_cuda_disabled_environment()
     baseline_root = args.baseline_root.resolve(strict=True)
     baseline_src = (baseline_root / "src").resolve(strict=True)
