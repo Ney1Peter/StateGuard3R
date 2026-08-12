@@ -1,7 +1,9 @@
 # Recovery encoder-global pooled pose export v11: execution plan
 
 - Date: 2026-08-07
-- Status: **pre-registered, not implemented and not GPU-authorized**
+- Status: **TERMINAL GATE-A CPU AVAILABILITY NO-GO; DO NOT EXECUTE.**  The
+  real-frame evidence is frozen in
+  `docs/audits/recovery-encoder-global-pooled-pose-export-v11-cpu-probe-no-go.md`.
 - Long-horizon objective: determine, with immutable evidence and without new
   data, weights, downloads, GT, future frames, raw-pose reuse, or fallback,
   whether a frozen current-frame encoder-global latent can provide a safe
@@ -64,7 +66,9 @@ raw prediction path.
 
 ## Gate A: implementation and CPU contract
 
-Before CUDA, require all of the following:
+Before CUDA, require all of the following. The required real-frame probe
+failed on the pinned CPU encoder/RoPE path, so Gate A did not pass and v11
+cannot advance to any CUDA work:
 
 1. Unit-test the encoder-global primitive: only a finite floating
    `(1,1,1024)` current-model output projects to `(1,1,768)`; wrong
