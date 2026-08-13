@@ -1,14 +1,22 @@
 # v16 bounded update-pressure with split RGB capabilities: execution plan
 
 - Date: 2026-08-13
-- Status: **pre-registration — no v16 CUDA run is authorized until a committed
-  Gate-A PASS.**
+- Status: **terminal — `V16_AVAILABILITY_OR_RUNTIME_NO_GO` (2026-08-14).**
 - Explicit objective (12--18 hours of active work): make one falsifiable,
   GT-free test of whether a Detector-v3 alarm can make *only later* ReCal3R
   global-state writes more conservative by a fixed bounded native-pressure
   increment.  This version is complete only with a frozen feasibility decision
   or a terminal pre-CUDA/runtime NO-GO.  A failed gate consumes its ID; it is
   never permission to tune, repair, or rerun that ID.
+
+## Terminal execution outcome
+
+Gate A passed and authorized exactly one dynamic always-commit control. That
+one-use control completed its 30-frame GPU execution, but failed both Gate-B
+protected-output identity and the `<= 1.20x` runtime requirement. v16 is
+therefore complete and terminal; its candidate, wrong/low matrix and GT
+evaluation are prohibited. The immutable evidence and exact values are in
+[the Gate-B NO-GO audit](audits/recovery-update-pressure-bounded-state-memory-v16-gate-b-no-go.md).
 
 ## 1. Why v16 is independent
 
