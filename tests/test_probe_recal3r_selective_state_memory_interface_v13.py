@@ -56,6 +56,13 @@ def test_v13_interface_probe_never_executes_model_or_repair_paths() -> None:
     assert '"state_memory_values_serialized": False' in source
 
 
+def test_v13_interface_probe_binds_default_omissions_by_instantiated_interfaces() -> None:
+    source = Path(probe.__file__).read_text(encoding="utf-8")
+    assert "checkpoint_loader_omits_default_state_fields" in source
+    assert "state_size_bound_by_register_tokens" in source
+    assert "local_mem_size_bound_by_pose_retriever_memory" in source
+
+
 def test_v13_interface_probe_installs_hard_failures_for_every_model_execution_route() -> None:
     events: list[str] = []
 

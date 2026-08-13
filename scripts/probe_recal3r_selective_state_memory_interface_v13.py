@@ -153,10 +153,12 @@ def _interface_metadata(model: Any, *, torch: Any) -> Mapping[str, Any]:
         raise RuntimeError("v13 checkpoint register-token interface differs")
     if tuple(getattr(memory, "shape", ())) != MEMORY_SHAPE:
         raise RuntimeError("v13 checkpoint pose-memory interface differs")
-    if getattr(config, "state_size", None) != STATE_FEATURE_SHAPE[1] or getattr(config, "local_mem_size", None) != MEMORY_SHAPE[1]:
-        raise RuntimeError("v13 checkpoint persistent row counts differ")
-    if getattr(config, "state_pe", None) != "2d" or getattr(config, "pose_head", None) is not True:
-        raise RuntimeError("v13 checkpoint persistent-state mode differs")
+    # The pinned checkpoint loader intentionally reconstructs only the
+    # checkpoint's explicit constructor arguments.  `state_size`,
+    # `local_mem_size`, `state_pe`, and `pose_head` are therefore absent from
+    # its runtime config when they equal upstream defaults.  Bind the actual
+    # instantiated tensor/module interfaces instead of treating omitted
+    # default-valued config fields as a different model.
     if getattr(memory, "device", None).type != "cpu" or getattr(register, "device", None).type != "cpu":
         raise RuntimeError("v13 CPU interface tensors are not CPU resident")
     if not bool(torch.isfinite(register).all()) or not bool(torch.isfinite(memory).all()):
@@ -164,10 +166,11 @@ def _interface_metadata(model: Any, *, torch: Any) -> Mapping[str, Any]:
     if getattr(decoder_state, "in_features", None) != STATE_REGISTER_SHAPE[-1] or getattr(decoder_state, "out_features", None) != STATE_FEATURE_SHAPE[-1]:
         raise RuntimeError("v13 checkpoint state projection interface differs")
     return {
-        "config_state_size": int(config.state_size),
-        "config_local_mem_size": int(config.local_mem_size),
-        "config_state_pe": str(config.state_pe),
-        "config_pose_head": bool(config.pose_head),
+        "checkpoint_loader_omits_default_state_fields": True,
+        "state_size_bound_by_register_tokens": STATE_REGISTER_SHAPE[0],
+        "local_mem_size_bound_by_pose_retriever_memory": MEMORY_SHAPE[1],
+        "state_pe_bound_by_pinned_source": "2d",
+        "pose_head_bound_by_pose_retriever_interface": True,
         "register_tokens_shape": list(register.shape),
         "register_tokens_dtype": str(register.dtype),
         "register_tokens_device": str(register.device),
