@@ -57,10 +57,21 @@ def _health_row(
     torch: Any,
     decode: Callable[[Any], Any],
     previous_camera: Any | None,
+    state_before: Any,
+    state_after: Any,
 ) -> tuple[dict[str, Any], Any]:
-    """Convert only the current trace/output into a finite scalar detector row."""
+    """Convert current native values into a finite scalar detector row.
 
-    required = {"frame_u_mean", "frame_step", "delta_norm", "frame_idx"}
+    ``_maybe_record_u_calibration_step`` receives the two live state values
+    immediately after the official global-state commit.  Reducing their
+    difference here preserves the required current-frame state-delta signal
+    without enabling ReCal3R's ``oracle_window``/``final_state`` trace modes;
+    those modes are unnecessary for v20 and would create an impermissible
+    future/final-state route.  The observer receives only the resulting Python
+    scalar, never either state tensor.
+    """
+
+    required = {"frame_u_mean", "frame_step"}
     if not isinstance(native_trace, Mapping) or not required <= set(native_trace):
         raise OfficialNativeScalarHoldV20Error("current native calibration trace differs")
     if frame_id == 0:
@@ -69,10 +80,11 @@ def _health_row(
         if not native_trace["frame_u_mean"] or not native_trace["frame_step"] or int(native_trace["frame_step"][-1].item()) != frame_id:
             raise OfficialNativeScalarHoldV20Error("native current uncertainty summary is unavailable")
         uncertainty = float(native_trace["frame_u_mean"][-1].item())
-        selected = [entry.reshape(-1) for entry, indices in zip(native_trace["delta_norm"], native_trace["frame_idx"], strict=True) if bool((indices.reshape(-1) == frame_id).all().item())]
-        if len(selected) != 1:
-            raise OfficialNativeScalarHoldV20Error("native current state delta is unavailable")
-        delta = float(selected[0].mean().item())
+        if not bool(torch.is_tensor(state_before)) or not bool(torch.is_tensor(state_after)):
+            raise OfficialNativeScalarHoldV20Error("native current state delta lacks state tensors")
+        if state_before.shape != state_after.shape:
+            raise OfficialNativeScalarHoldV20Error("native current state delta shape differs")
+        delta = float(torch.linalg.vector_norm(state_after - state_before, dim=-1).mean().item())
     camera = decode(prediction["camera_pose"])
     pose_jump = None
     if previous_camera is not None:
@@ -110,15 +122,18 @@ def official_native_scalar_hold_v20(
         raise OfficialNativeScalarHoldV20Error("v20 needs official raw views")
     originals = (model._downstream_head, model._compute_recal3r_update_mask, model._maybe_record_u_calibration_step)
     timeline: list[Mapping[str, Any]] = []
-    armed, frame_id, prediction, selection, native_mask, previous_camera = False, -1, None, None, None, None
+    armed, frame_id, prediction, selection, native_mask, previous_camera, previous_reset = False, -1, None, None, None, None, False
 
     def head(*args: Any, **kwargs: Any) -> Mapping[str, Any]:
         nonlocal frame_id, prediction, selection, native_mask
         frame_id += 1
         if frame_id >= len(raw_views):
             raise OfficialNativeScalarHoldV20Error("official head exceeded v20 stream")
-        reset = _scalar_bool(raw_views[frame_id]["reset"], label="native reset")
-        selection = _Selection(armed, bool(armed and not reset), bool(armed and reset))
+        # The official loop makes native-mask eligibility depend on the reset
+        # flag carried from the *preceding* frame.  Selection must follow the
+        # same timing: consuming an arm where upstream has no native mask is
+        # forbidden rather than silently moving the intervention.
+        selection = _Selection(armed, bool(armed and not previous_reset), bool(armed and previous_reset))
         native_mask = None
         prediction = originals[0](*args, **kwargs)
         if not isinstance(prediction, Mapping):
@@ -138,18 +153,27 @@ def official_native_scalar_hold_v20(
         return held
 
     def record(native_frame: int, state_before: Any, state_after: Any) -> None:
-        nonlocal armed, prediction, previous_camera
+        nonlocal armed, prediction, previous_camera, previous_reset
         originals[2](native_frame, state_before, state_after)
         if native_frame != frame_id or prediction is None or selection is None:
             raise OfficialNativeScalarHoldV20Error("v20 calibration order differs")
         if frame_id > 0 and native_mask is None:
             raise OfficialNativeScalarHoldV20Error("native mask missing before current state commit")
-        before, after = _summary(state_before, torch=torch, label="native pre-state"), _summary(state_after, torch=torch, label="native post-state")
-        if selection.consumed and before != after:
-            raise OfficialNativeScalarHoldV20Error("held global state is not identity")
+        if selection.consumed:
+            if not bool(torch.equal(state_before, state_after)):
+                raise OfficialNativeScalarHoldV20Error("held global state is not identity")
         alarm, row, detector_evidence, alarm_witness = False, None, {}, {}
         if observer is not None:
-            row, next_camera = _health_row(frame_id, prediction, model.get_u_calibration_trace(), torch=torch, decode=decode, previous_camera=previous_camera)
+            row, next_camera = _health_row(
+                frame_id,
+                prediction,
+                model.get_u_calibration_trace(),
+                torch=torch,
+                decode=decode,
+                previous_camera=previous_camera,
+                state_before=state_before,
+                state_after=state_after,
+            )
             state_before_observer = _summary(state_after, torch=torch, label="alarm committed state")
             pose_before_observer = _summary(prediction["camera_pose"], torch=torch, label="alarm raw pose")
             decision = observer.observe(row)
@@ -165,6 +189,7 @@ def official_native_scalar_hold_v20(
             previous_camera = next_camera
         if alarm and selection.consumed:
             raise OfficialNativeScalarHoldV20Error("same v20 frame consumed old arm and raised new alarm")
+        current_reset = _scalar_bool(raw_views[frame_id]["reset"], label="native reset")
         armed = bool(alarm and frame_id + 1 < len(raw_views))
         timeline.append({
             "frame_id": frame_id,
@@ -176,11 +201,13 @@ def official_native_scalar_hold_v20(
             "native_mask_computed": native_mask is not None,
             "final_state_mask_replaced_by_zero": selection.consumed,
             "held_global_state_gpu_identity": None if not selection.consumed else True,
+            "held_global_state_exact_equal": None if not selection.consumed else True,
             "native_memory_update_rule_unchanged": True,
             "detector_row": row,
             **alarm_witness,
             **detector_evidence,
         })
+        previous_reset = current_reset
         prediction = None
 
     model._downstream_head, model._compute_recal3r_update_mask, model._maybe_record_u_calibration_step = head, mask, record

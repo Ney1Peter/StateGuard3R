@@ -30,12 +30,10 @@ class NativeScalarDetectorV20Config:
     threshold: float = 2.0
 
     def __post_init__(self) -> None:
-        if type(self.history) is not int or type(self.minimum_history) is not int or self.history < 1 or self.minimum_history < 1 or self.minimum_history > self.history:
+        if (self.history, self.minimum_history) != (5, 3):
             raise NativeScalarDetectorV20Error("frozen v20 history configuration differs")
-        for name in ("scale_floor", "max_score", "threshold"):
-            value = float(getattr(self, name))
-            if not math.isfinite(value) or value <= 0.0:
-                raise NativeScalarDetectorV20Error(f"frozen v20 {name} differs")
+        if (self.scale_floor, self.max_score, self.threshold) != (1e-6, 20.0, 2.0):
+            raise NativeScalarDetectorV20Error("frozen v20 scalar configuration differs")
 
 
 @dataclass(frozen=True, slots=True)

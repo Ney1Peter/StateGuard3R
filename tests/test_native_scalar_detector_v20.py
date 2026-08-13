@@ -83,6 +83,8 @@ class _Torch:
     def is_floating_point(value: Any) -> bool: return isinstance(value, _Tensor)
     @staticmethod
     def isfinite(value: _Tensor) -> SimpleNamespace: return SimpleNamespace(all=lambda: SimpleNamespace(item=lambda: True))
+    @staticmethod
+    def equal(left: _Tensor, right: _Tensor) -> bool: return left.value == right.value
 
 
 class _Observer:
@@ -149,3 +151,21 @@ def test_v20_wrapper_rejects_same_frame_consume_and_alarm(monkeypatch: pytest.Mo
     with pytest.raises(runtime.OfficialNativeScalarHoldV20Error, match="same v20"):
         with runtime.official_native_scalar_hold_v20(model, views, torch=_Torch(), decode=lambda value: value, observer=_Observer({0, 1})):
             _official_loop(model, views)
+
+
+def test_v20_reset_cancels_the_pending_hold_using_official_previous_reset_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runtime, "_health_row", lambda frame_id, *_args, **_kwargs: (_row(frame_id, 0.1), _Tensor(frame_id + 10)))
+    model, views, observer = _model(), _views(4), _Observer({0})
+    views[0]["reset"] = _Tensor(1)
+    with runtime.official_native_scalar_hold_v20(model, views, torch=_Torch(), decode=lambda value: value, observer=observer) as timeline:
+        _official_loop(model, views)
+    assert timeline[1]["arm_reset_cancelled"] is True
+    assert timeline[1]["arm_consumed"] is False
+    assert all(row["final_state_mask_replaced_by_zero"] is False for row in timeline)
+
+
+def test_v20_frozen_detector_configuration_rejects_tuning() -> None:
+    with pytest.raises(NativeScalarDetectorV20Error, match="frozen"):
+        NativeScalarDetectorV20Config(threshold=2.1)
