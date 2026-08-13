@@ -1,8 +1,8 @@
 # v15 bounded update-pressure from an independent RGB listing: execution plan
 
 - Date: 2026-08-13
-- Status: **pre-registration — no v15 CUDA run is authorized until Gate A is
-  committed PASS.**
+- Status: **terminal — `V15_IMPLEMENTATION_OR_INPUT_NO_GO`; no v15 CUDA run
+  is authorized.**
 - Explicit objective (12--18 hours of active work): make one falsifiable,
   GT-free test of whether a Detector-v3 alarm can causally make *only later*
   ReCal3R global-state writes more conservative by adding a fixed bounded
@@ -10,6 +10,16 @@
   when this version has a frozen feasibility decision or a terminal
   pre-CUDA/runtime NO-GO.  A failed gate is evidence, not permission to tune
   or retry the same v15 run ID.
+
+> **Terminal Gate-A decision (2026-08-13).** The one-use CUDA-hidden interface
+> probe called the general v15 capsule loader in order to select frame zero.
+> That loader revalidated and read the raw `rgb.txt` listing.  Gate A item 5
+> limited that probe to the capsule, frame-zero RGB and checkpoint, so the
+> evidence exceeds its own pre-registered capability boundary.  The probe's
+> immutable output must not be reinterpreted as PASS.  Per Section 5, v15 is
+> terminal; do not alter, rerun, dispatch, or otherwise reopen its IDs.  The
+> full record is in
+> [the v15 Gate-A NO-GO audit](audits/recovery-update-pressure-bounded-state-memory-v15-gate-a-no-go.md).
 
 ## 1. Why v15 exists and what it does not reuse
 

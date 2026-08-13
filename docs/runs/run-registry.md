@@ -1931,7 +1931,8 @@ launched or created.
 
 ### RECOVERY-UPDATE-PRESSURE-BOUNDED-STATE-MEMORY-V15-0001: independent RGB-list bounded write pressure
 
-- Status: **pre-registered — Gate A only; no CUDA release is authorized.**
+- Status: **terminal — `V15_IMPLEMENTATION_OR_INPUT_NO_GO`; no CUDA release
+  was authorized.**
 - Rationale: v14's historical-archive capsule provenance is terminally
   disallowed.  v15 instead derives its sole dynamic RGB capability directly
   from the ordinary raw `rgb.txt` listing and thirty read-only raw RGB files;
@@ -1943,7 +1944,14 @@ launched or created.
 - Fixed first-release IDs:
   `recovery-update-pressure-v15-dynamic-always-commit-0001` and
   `recovery-update-pressure-v15-dynamic-candidate-0001`.
-- Plan: [recovery-update-pressure-bounded-state-memory-v15-rgb-list-execution-plan.md](../recovery-update-pressure-bounded-state-memory-v15-rgb-list-execution-plan.md).
+- Gate-A terminal reason: the one-use CUDA-hidden frame-zero probe called the
+  general RGB-list capsule loader, which re-read `rgb.txt`; the probe was
+  pre-registered to read only its capsule, frame-zero RGB and checkpoint.  Its
+  frozen `status="passed"` evidence therefore cannot be a Gate-A PASS.  No
+  v15 tmux window, dispatcher, lease, CUDA forward, control/candidate,
+  wrong/low matrix, GT evaluation, download, or ReCal3R/raw-RGB/checkpoint
+  modification occurred.
+- Audit: [recovery-update-pressure-bounded-state-memory-v15-gate-a-no-go.md](../audits/recovery-update-pressure-bounded-state-memory-v15-gate-a-no-go.md).
 
 ## Experiment record template
 
