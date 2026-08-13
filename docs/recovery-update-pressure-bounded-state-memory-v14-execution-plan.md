@@ -1,8 +1,12 @@
 # v14 bounded update-pressure: execution plan
 
 - Date: 2026-08-13
-- Status: **pre-registration — no v14 CUDA run is authorized until Gate A is
-  committed PASS.**
+- Status: **terminal Gate-A NO-GO —
+  `V14_IMPLEMENTATION_OR_INPUT_NO_GO`.  The quarantined-archive builder reads
+  the entire legacy `run.json` to calculate its SHA-256 before extracting the
+  `images` projection, contradicting the required no-read-past-delimiter
+  boundary.  No v14 CUDA run is authorized.**  See [the Gate-A NO-GO
+  audit](audits/recovery-update-pressure-bounded-state-memory-v14-gate-a-no-go.md).
 - Long-horizon objective (12--18 hours of active work): determine, without
   tuning on a response, whether a causal alarm can safely make **only future
   ReCal3R global-state writes** more conservative by injecting bounded native

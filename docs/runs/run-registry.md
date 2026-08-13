@@ -1911,6 +1911,24 @@ launched or created.
   evaluation, download or ReCal3R modification occurred.
 - Audit: [recovery-selective-state-memory-repair-v13-gate-a-no-go.md](../audits/recovery-selective-state-memory-repair-v13-gate-a-no-go.md).
 
+### RECOVERY-UPDATE-PRESSURE-BOUNDED-STATE-MEMORY-V14-0001: bounded native write pressure
+
+- Status: **terminal — `V14_IMPLEMENTATION_OR_INPUT_NO_GO`**.
+- Gate A did not authorize CUDA: the one-time RGB-only capsule builder computes
+  a whole-file SHA-256 over the quarantined legacy `run.json` before it extracts
+  the top-level `images` array.  The archive's `images` array ends at byte 8491,
+  while the quarantined `input_frames` suffix begins at byte 8496; full-file
+  hashing necessarily reads that suffix.  This contradicts the pre-registered
+  poisoned-reader requirement that any read past the `images` delimiter fail.
+- The immutable dynamic capsule was written mode `0444`; a CUDA-hidden CPU
+  interface probe also bound `(1,768,768)` state, `(1,256,1536)` memory and
+  `(1,768,1)` update-pressure shapes without a forward or CUDA initialization.
+  Neither fact authorizes a version whose archive boundary already failed.
+- No v14 dispatcher/waiter, tmux child, CUDA forward, dynamic control/candidate,
+  wrong/low matrix, GT quality evaluation, download, or modification of
+  ReCal3R, checkpoint, or raw RGB occurred.
+- Audit: [recovery-update-pressure-bounded-state-memory-v14-gate-a-no-go.md](../audits/recovery-update-pressure-bounded-state-memory-v14-gate-a-no-go.md).
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
