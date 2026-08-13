@@ -160,7 +160,7 @@ def test_v13_candidate_repairs_persistent_rows_after_raw_detector_before_cpu_tra
 
         def alarm(self, observation: object) -> bool:
             events.append("alarm")
-            return observation == 1
+            return observation in {0, 1}
 
         def finalize(self, observation: object, *, repaired: bool, prediction: object, repair_evidence: object) -> tuple[object, dict[str, object]]:
             events.append("finalize")
@@ -181,7 +181,9 @@ def test_v13_candidate_repairs_persistent_rows_after_raw_detector_before_cpu_tra
         observer=observer, verify_source=False, require_cuda_for_repair=False,
     )
     assert len(result.predictions) == len(transferred) == 3
-    assert result.timeline[0]["action"] == "commit"
+    # The initialized first frame is eligible: v13 has a valid pre-update
+    # persistent state/memory snapshot before its native update.
+    assert result.timeline[0]["action"] == "selective_state_memory_repair"
     assert result.timeline[1]["action"] == "selective_state_memory_repair"
     repair = result.timeline[1]["repair"]
     assert repair is not None
@@ -192,13 +194,14 @@ def test_v13_candidate_repairs_persistent_rows_after_raw_detector_before_cpu_tra
     assert observer.finalized[1][1]["camera_pose"] is transferred[1]["camera_pose"]
     frame_one = len(events) // 3
     assert events[frame_one:].index("calibration") < events[frame_one:].index("observe") < events[frame_one:].index("alarm") < events[frame_one:].index("finalize")
-    # The third recurrent rollout receives frame 1's partially repaired state,
-    # not either full pre-state (zero) or full proposed state (two times row).
+    # The third recurrent rollout receives frame 1's partially repaired state:
+    # its largest rows have been restored to frame 1's pre-state, while the
+    # smallest rows retain frame 1's native proposal.
     state_at_frame_two = model.seen_state[2]
     memory_at_frame_two = model.pose_retriever.inquired_memory[1]
-    assert float(state_at_frame_two[0, 767, 0]) == pytest.approx(768.0)
+    assert float(state_at_frame_two[0, 767, 0]) == pytest.approx(0.0)
     assert float(state_at_frame_two[0, 0, 0]) == pytest.approx(2.0)
-    assert float(memory_at_frame_two[0, 255, 0]) == pytest.approx(256.0)
+    assert float(memory_at_frame_two[0, 255, 0]) == pytest.approx(0.0)
     assert float(memory_at_frame_two[0, 0, 0]) == pytest.approx(2.0)
 
     control = _Model()

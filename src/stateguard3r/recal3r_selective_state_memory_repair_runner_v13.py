@@ -156,7 +156,11 @@ def run_selective_state_memory_repair_recurrent_lighter(
             init_state_feat, init_mem = state_feat.clone(), mem.clone()
             if tuple(state_feat.shape) != (1, 768, 768) or tuple(mem.shape) != (1, 256, 1536):
                 raise SelectiveStateMemoryRepairRunnerError("pinned ReCal3R state/memory shapes changed")
-        repair_prestate = capture_state_memory_prestate(state_feat, mem, torch=torch) if observer is not None and i else None
+        # Frame zero has a real initialized persistent state and memory too.
+        # It is therefore eligible for the same post-update repair as every
+        # other non-reset frame; silently exempting it would make the fixed
+        # detector policy depend on frame number rather than current health.
+        repair_prestate = capture_state_memory_prestate(state_feat, mem, torch=torch) if observer is not None else None
         global_img_feat_i = model._get_img_level_feat(feat_i) if model.pose_head_flag else None
         if model.pose_head_flag:
             pose_feat_i = model.pose_token.expand(feat_i.shape[0], -1, -1) if i == 0 or reset_mask else model.pose_retriever.inquire(global_img_feat_i, mem)
@@ -195,7 +199,7 @@ def run_selective_state_memory_repair_recurrent_lighter(
             timeline.append({"frame_id": i, "action": "commit", "reason": "always_commit_control", "current_alarm": False, "consecutive_repairs": 0, "pending_transaction_count": 0, "repair": None, "export_action": "export_real_camera_pose"})
         else:
             observation = observer.observe(i, res, model, frame_context)
-            repair = bool(observer.alarm(observation)) if i else False
+            repair = bool(observer.alarm(observation))
             consecutive = watchdog.record(quarantine=repair)
             repair_evidence = None
             if repair:
