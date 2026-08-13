@@ -70,7 +70,7 @@ operator routes.  It did not serialize image or tensor values.
 | item | bound value |
 | --- | --- |
 | StateGuard3R source commit | `36fafbcf1dacbffba1df38fe07f10359f3a748ea` |
-| ReCal3R commit | `466c7cdf3acd2f589f1d82e5f6391966f19dbff` |
+| ReCal3R commit | `466c7cdf3acd2f589f1d82e5f6391966f19db9ff` |
 | checkpoint SHA-256 | `45f7e98a0a64dbeb54901ae2b878cd8cd125f20a4497316483f0bd6f109f8103` |
 | raw `rgb.txt` SHA-256 | `d1bc510ecca08540e03be8df55af8857753b614d8a5c38526bc669ce6c802284` |
 | runtime import graph | seven local modules; no v1–v15, recovery/input, GT or offline artifact route |
