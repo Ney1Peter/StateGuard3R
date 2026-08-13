@@ -43,7 +43,7 @@ class CurrentFrameObserverV17(Protocol):
         self,
         frame_id: int,
         prediction: Mapping[str, Any],
-        model: Any,
+        native_trace: Any,
         frame_context: Mapping[str, Any] | None,
     ) -> Any: ...
 
@@ -440,7 +440,11 @@ def run_recurrent_beta_floor_native_v17(
         alarm_witness: Mapping[str, Any] = {}
         alarm = False
         if observer is not None:
-            observation = observer.observe(frame_id, res, model, frame_context)
+            # The observer is intentionally denied the mutable model object.
+            # It may only turn this already-produced native trace plus the raw
+            # current prediction into scalar health, then commit that scalar.
+            native_trace = model.get_u_calibration_trace()
+            observation = observer.observe(frame_id, res, native_trace, frame_context)
             alarm = bool(observer.alarm(observation))
             if (
                 alarm

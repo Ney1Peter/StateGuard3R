@@ -51,6 +51,7 @@ NATIVE_MODEL_METHODS = frozenset(
         "_encode_image",
         "_encode_ray_map",
         "_get_img_level_feat",
+        "get_u_calibration_trace",
         "_init_recal3r_reference_state",
         "_init_state",
         "_maybe_record_u_calibration_step",

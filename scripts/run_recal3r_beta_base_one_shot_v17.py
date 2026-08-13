@@ -280,12 +280,12 @@ class _RawObserverV17:
         self._detector, self._captures, self._torch, self._decode = detector, list(captures), torch, decode
         self._previous_camera, self.records = None, []
 
-    def observe(self, frame_id: int, prediction: Mapping[str, Any], model: Any, frame_context: Mapping[str, Any] | None) -> _Observation:
+    def observe(self, frame_id: int, prediction: Mapping[str, Any], native_trace: Any, frame_context: Mapping[str, Any] | None) -> _Observation:
         from stateguard3r.health import adapt_recal3r_trace
 
         if frame_context is None or frame_id >= len(self._captures):
             raise RunBetaBaseOneShotV17Error("v17 current health lacks causal RGB context")
-        native = adapt_recal3r_trace(model.get_u_calibration_trace(), all_frame_ids=list(range(frame_id + 1)), timestamps=[float(item["rgb_capture_timestamp"]) for item in self._captures[:frame_id + 1]], batch_size=1)[-1]
+        native = adapt_recal3r_trace(native_trace, all_frame_ids=list(range(frame_id + 1)), timestamps=[float(item["rgb_capture_timestamp"]) for item in self._captures[:frame_id + 1]], batch_size=1)[-1]
         raw_camera = self._decode(prediction["camera_pose"])
         pose_jump = None
         if self._previous_camera is not None:

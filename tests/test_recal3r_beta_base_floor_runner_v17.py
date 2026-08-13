@@ -105,6 +105,9 @@ class _Model:
     def _maybe_record_u_calibration_step(self, *_args: object) -> None:
         return None
 
+    def get_u_calibration_trace(self) -> dict[str, object]:
+        return {}
+
     def _reset_update_pressure_if_needed(self, *_args: object) -> None:
         self.reset_calls += 1
 
@@ -129,6 +132,13 @@ class _Observer:
 
     def timeline_evidence(self, observation: tuple[int, object]) -> dict[str, object]:
         return {"online_detector": {"frame_id": observation[0]}}
+
+
+class _MutatingObserver(_Observer):
+    def finalize(self, observation: tuple[int, object]) -> dict[str, object]:
+        prediction = observation[1]
+        prediction["camera_pose"].add_(1.0)
+        return super().finalize(observation)
 
 
 def _run(torch: object, views: list[dict[str, object]], observer: object | None) -> tuple[_Model, object]:
@@ -189,6 +199,18 @@ def test_v17_reset_cancels_arm_and_never_carries_it_forward() -> None:
     assert cancelled["arm_reset_cancelled"] is True
     assert cancelled["arm_consumed"] is False
     assert model.reset_calls == 1
+
+
+def test_v17_alarm_frame_witness_rejects_detector_mutation() -> None:
+    torch = _torch()
+    with pytest.raises(runner.RecurrentBetaFloorV17Error, match="altered"):
+        _run(torch, [_view(torch), _view(torch)], _MutatingObserver({0}))
+
+
+def test_v17_simultaneous_consumption_and_alarm_fails_closed() -> None:
+    torch = _torch()
+    with pytest.raises(runner.RecurrentBetaFloorV17Error, match="simultaneously"):
+        _run(torch, [_view(torch), _view(torch), _view(torch)], _Observer({0, 1}))
 
 
 def test_v17_scalar_scope_restores_on_native_exception() -> None:

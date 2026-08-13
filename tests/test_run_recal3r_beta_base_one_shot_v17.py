@@ -34,6 +34,8 @@ def test_v17_production_script_is_own_version_and_uses_independent_control_seria
     assert "_output_health_signals_v17" in source
     assert "inference.inference_recurrent_lighter" in source
     assert "get_u_calibration_last_state" not in source
+    assert "observer.observe(frame_id, res, model" not in source
+    assert "FIXED_OUTPUTS" in source
     assert not any(
         module.endswith(f"_v{version}") or f"_v{version}." in module
         for module in modules
@@ -59,6 +61,25 @@ def test_v17_control_serializer_has_fixed_canonical_json_contract(tmp_path: Path
         b'  "unexpected_keys": []\n'
         b"}\n"
     )
+
+
+def test_v17_fixed_command_binds_each_policy_to_its_single_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run = _load()
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2")
+    control = run._parser().parse_args(
+        [
+            "--capsule", str(run.CAPSULE),
+            "--output-dir", str(run.FIXED_OUTPUTS[run.CONTROL_POLICY]),
+            "--device", "cuda", "--size", "512", "--state-policy", run.CONTROL_POLICY,
+            "--detector-config", str(run.DETECTOR_CONFIG),
+        ]
+    )
+    run._fixed_command(control)
+    control.output_dir = tmp_path / "not-preregistered"
+    with pytest.raises(run.RunBetaBaseOneShotV17Error, match="fixed release"):
+        run._fixed_command(control)
 
 
 class _FakeTensor:
