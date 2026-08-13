@@ -1,9 +1,14 @@
 # Recovery selective state-memory repair v13: execution plan
 
 - Date: 2026-08-13
-- Status: **pre-implementation; no v13 CUDA forward, output, lease, command
-  JSON, candidate, GT read, quality evaluation, data acquisition or download
-  exists.**
+- Status: **terminal Gate-A NO-GO —
+  `SELECTIVE_STATE_MEMORY_REPAIR_V13_IMPLEMENTATION_OR_CPU_CONTRACT_NO_GO`.
+  The unique dynamic always-control was released through its committed tmux
+  waiter, but its dispatcher aborted before a preflight, child, checkpoint
+  load, CUDA forward or output.  No v13 control/candidate output, wrong/low
+  matrix, quality evaluation, data acquisition, download or modification of
+  ReCal3R occurred.**  See
+  [the Gate-A NO-GO audit](audits/recovery-selective-state-memory-repair-v13-gate-a-no-go.md).
 - Long-horizon objective (12–18 hours of active work): determine whether a
   causal, bounded **partial repair of persistent ReCal3R state and pose memory**
   can suppress an alarm frame's largest state changes while preserving its raw
@@ -190,3 +195,18 @@ improving both tail ATE and translation RPE, both median improvements at least
 `+5%`, and median candidate runtime ratio `<=1.20`.  PASS writes an unexecuted
 new-data acquisition plan only.  Any failure writes a v13 feasibility NO-GO
 and does not reopen this matrix.
+
+## 7. Terminal execution record
+
+Gate A is closed as a NO-GO.  The independent audit found that the v13
+production runner directly imports the old v2 recovery runner, contrary to the
+immutable v13 mechanism boundary.  It also found that its argument validator
+deserializes the complete development manifest, including embedded GT
+metadata, before the six development outputs are frozen.  These are not
+permitted to be repaired or retried within v13.  Separately, the unique dynamic
+always-control had already reached the one-use dispatcher but aborted before
+its preflight.  Its implementation did not retain stderr for the preflight
+exception, so the exact early failure is not reproducible; this makes the
+one-use control evidence incomplete as well as failed.  The only real v13
+forward-adjacent evidence is the frozen non-CUDA interface probe and the
+immutable waiter record; no GPU forward or later-stage output exists.

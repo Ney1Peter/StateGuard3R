@@ -1892,6 +1892,25 @@ launched or created.
   in `logs/recovery-geometric-registration-v4-dynamic-*`.
 - Audit: [recovery-geometric-registration-export-development-v4-result.md](../audits/recovery-geometric-registration-export-development-v4-result.md).
 
+### RECOVERY-SELECTIVE-STATE-MEMORY-REPAIR-V13-0001: bounded persistent-row repair
+
+- Status: **terminal — `SELECTIVE_STATE_MEMORY_REPAIR_V13_IMPLEMENTATION_OR_CPU_CONTRACT_NO_GO`**.
+- Gate A did not authorize CUDA: v13 directly imports the earlier v2 recovery runner and
+  deserializes manifests containing embedded GT metadata before the frozen six-output boundary.
+  Both violate the v13 immutable boundary.  This is recorded as a protocol failure, not repaired
+  by changing the runner or rerunning v13.
+- Mechanical non-CUDA checks passed (25 targeted tests; full CPU suite 692 passed; compile,
+  whitespace and shell syntax checks passed), and the single frozen CPU interface probe bound the
+  `(1,768,768)` state and `(1,256,1536)` memory interfaces.  These facts are insufficient to
+  authorize a version whose source/input contract already failed.
+- The unique dynamic control was released through tmux after two `45586 MiB` free-memory
+  observations.  Its dispatcher created the one-use lease but aborted before any dispatcher
+  preflight, child, checkpoint load, CUDA forward or output.  The wait log does not retain its
+  stderr, so the exact early failure is unprovable; the command JSON and empty lease are preserved
+  as terminal incomplete-evidence artifacts.  No candidate/wrong/low matrix, GT quality
+  evaluation, download or ReCal3R modification occurred.
+- Audit: [recovery-selective-state-memory-repair-v13-gate-a-no-go.md](../audits/recovery-selective-state-memory-repair-v13-gate-a-no-go.md).
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
