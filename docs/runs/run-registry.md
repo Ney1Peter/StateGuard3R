@@ -1953,6 +1953,24 @@ launched or created.
   modification occurred.
 - Audit: [recovery-update-pressure-bounded-state-memory-v15-gate-a-no-go.md](../audits/recovery-update-pressure-bounded-state-memory-v15-gate-a-no-go.md).
 
+### RECOVERY-UPDATE-PRESSURE-BOUNDED-STATE-MEMORY-V16-0001: split-capability bounded write pressure
+
+- Status: **pre-registered — Gate A only; no CUDA release is authorized.**
+- Rationale: v15's independent dynamic capability was sound for runtime but
+  too broad for the separately constrained frame-zero interface probe.  v16
+  owns two non-interchangeable raw-RGB capabilities: a one-frame probe capsule
+  whose parser cannot read `rgb.txt`, and a 30-frame dynamic capsule whose
+  runtime is permitted to bind raw RGB timestamps.  Neither may use v1--v15
+  components, archives, manifests or outputs.
+- Fixed mechanism: after native update/state/memory/calibration/reset and
+  frozen raw-health detector commit, an alarm adds exactly `0.25` to CUDA
+  `update_pressure`, capped at `1.0`; it cannot alter current raw output,
+  state or memory.
+- Fixed first-release IDs:
+  `recovery-update-pressure-v16-dynamic-always-commit-0001` and
+  `recovery-update-pressure-v16-dynamic-candidate-0001`.
+- Plan: [recovery-update-pressure-bounded-state-memory-v16-split-capability-execution-plan.md](../recovery-update-pressure-bounded-state-memory-v16-split-capability-execution-plan.md).
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
