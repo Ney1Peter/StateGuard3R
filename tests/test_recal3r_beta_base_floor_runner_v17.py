@@ -92,6 +92,8 @@ class _Model:
         self.mask_bases.append(self._beta_base())
         if self.fail_mask:
             raise RuntimeError("injected native mask failure")
+        torch = _torch()
+        self._u_calibration_pending_u = torch.ones((1, 1, 1))
         return mask * self._beta_base()
 
     def _compute_state_update_mask(self, mask: object, *_args: object) -> tuple[object, object, object]:
@@ -151,7 +153,7 @@ def test_v17_control_has_no_arm_scope_or_observer_evidence() -> None:
     model, result = _run(torch, [_view(torch), _view(torch), _view(torch)], None)
     assert model.mask_bases == [0.1, 0.1]
     assert all(row["beta_floor"] is None for row in result.timeline)
-    assert all(row["action"] == "commit" for row in result.timeline)
+    assert all(row["action"] == "native_commit" for row in result.timeline)
     assert all(value["raw_sentinel"] == "unaltered" for value in result.predictions)
 
 
@@ -167,7 +169,12 @@ def test_v17_alarm_changes_only_next_native_mask_and_restores_scalar() -> None:
     assert consumed["arm_consumed"] is True
     assert consumed["native_beta_base_during_mask"] == 0.0
     assert consumed["native_beta_base_after_mask"] == 0.1
-    assert result.timeline[0]["action"] == "arm_one_future_native_beta_floor"
+    assert consumed["strict_native_mask_reduction"] is True
+    assert consumed["native_pending_r_positive"] is True
+    assert result.timeline[0]["action"] == "armed_one_future_native_update"
+    assert result.timeline[0]["raw_current_state_gpu_fingerprint_unchanged"] is True
+    assert result.timeline[0]["raw_current_mem_gpu_fingerprint_unchanged"] is True
+    assert result.timeline[0]["raw_current_pose_gpu_fingerprint_unchanged"] is True
     assert all(value["raw_sentinel"] == "unaltered" for value in result.predictions)
     assert model.update_pressure is not None
 

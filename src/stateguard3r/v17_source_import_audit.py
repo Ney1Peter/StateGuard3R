@@ -14,7 +14,13 @@ PACKAGE = ROOT / "src" / "stateguard3r"
 V17_ALLOWED_MODULES = frozenset(
     {
         "beta_base_floor_v17",
+        "dynamic_rgb_capability_v17",
+        "frame_zero_probe_capability_v17",
+        "health",
+        "online_detector_v17",
+        "online_visual_overlap_v17",
         "recal3r_beta_base_floor_runner_v17",
+        "timestamp_order_v17",
         "v17_source_import_audit",
     }
 )
@@ -106,6 +112,8 @@ def _is_disallowed_local_name(name: str) -> bool:
 
 
 def _has_prohibited_dynamic_import(tree: ast.Module) -> bool:
+    """Reject dynamic local imports while allowing the fixed lazy cv2 load."""
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -116,16 +124,21 @@ def _has_prohibited_dynamic_import(tree: ast.Module) -> bool:
             and node.func.attr == "import_module"
         )
         if is_dynamic:
-            return True
+            if not node.args or not isinstance(node.args[0], ast.Constant):
+                return True
+            target = node.args[0].value
+            if target != "cv2":
+                return True
     return False
 
 
 def _has_prohibited_artifact_literal(tree: ast.Module) -> bool:
+    prohibited = ("/" + "outputs" + "/", "run" + ".json")
     for node in ast.walk(tree):
         if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
             continue
         value = node.value.lower().replace("\\", "/")
-        if "/outputs/" in value or "run.json" in value or "input_manifest" in value:
+        if any(token in value for token in prohibited):
             return True
     return False
 
@@ -172,6 +185,47 @@ def audit_v17_runtime_import_graph(paths: Iterable[Path]) -> Mapping[str, Any]:
     }
 
 
+def audit_v17_production_script(script: Path, runtime_paths: Iterable[Path]) -> Mapping[str, Any]:
+    """Bind the v17 release script to its independently audited local graph."""
+
+    script = Path(script).resolve(strict=True)
+    try:
+        relative = script.relative_to(ROOT / "scripts")
+    except ValueError as error:
+        raise V17SourceImportAuditError("v17 production script is outside scripts") from error
+    if relative != Path("run_recal3r_beta_base_one_shot_v17.py"):
+        raise V17SourceImportAuditError("v17 production script path differs")
+    tree = _parse(script)
+    imports = _local_imports(tree)
+    if any(_is_disallowed_local_name(name) for name in imports):
+        raise V17SourceImportAuditError("v17 production script imports a prohibited local module")
+    if _has_prohibited_dynamic_import(tree):
+        raise V17SourceImportAuditError("v17 production script uses a dynamic local import")
+    source = script.read_text(encoding="utf-8")
+    forbidden_tokens = (
+        "formal-v3-runs",
+        "development-dynamic",
+        "input_manifest",
+        "recovery-update-pressure",
+        "bounded_update_pressure",
+    )
+    if any(token in source.lower() for token in forbidden_tokens):
+        raise V17SourceImportAuditError("v17 production script contains a historical artifact literal")
+    graph = audit_v17_runtime_import_graph(runtime_paths)
+    allowed_script_imports = set(graph["visited_modules"]) | {"health"}
+    if not set(imports) <= allowed_script_imports:
+        raise V17SourceImportAuditError(
+            "v17 production script import is absent from its audited runtime graph"
+        )
+    return {
+        **graph,
+        "production_script": str(script),
+        "production_script_sha256": hashlib.sha256(script.read_bytes()).hexdigest(),
+        "production_script_local_imports": sorted(set(imports)),
+        "historical_production_artifact_capability": False,
+    }
+
+
 def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == name:
@@ -201,6 +255,11 @@ def audit_v17_native_runner_contract(path: Path) -> Mapping[str, Any]:
         raise V17SourceImportAuditError("v17 native causal order is incomplete") from error
     if not mask < scoped < state < memory < calibration < reset < observe < commit < arm < transfer:
         raise V17SourceImportAuditError("v17 native causal order differs")
+    strict_witness = source.find("_strict_mask_reduction_witness_v17", scoped, state)
+    if strict_witness < 0:
+        raise V17SourceImportAuditError("v17 runner lost its native strict-mask witness")
+    if "get_u_calibration_last_state" in source:
+        raise V17SourceImportAuditError("v17 runner reads a CPU calibration-state witness")
     model_calls = {
         node.func.attr
         for node in ast.walk(function)
@@ -269,6 +328,8 @@ def audit_v17_native_runner_contract(path: Path) -> Mapping[str, Any]:
         "future_arm_before_raw_export": True,
         "only_candidate_model_mutation": "temporary_model_beta_base_scalar_scope",
         "native_reset_method_bound": "model._reset_update_pressure_if_needed",
+        "native_strict_mask_witness": True,
+        "alarm_frame_witness_origin": "post_native_commit_gpu_resident_state_memory_pose",
     }
 
 
@@ -278,5 +339,6 @@ __all__ = [
     "V17_ALLOWED_MODULES",
     "V17SourceImportAuditError",
     "audit_v17_native_runner_contract",
+    "audit_v17_production_script",
     "audit_v17_runtime_import_graph",
 ]

@@ -168,6 +168,92 @@ def _mask_scope_evidence(
     }
 
 
+def _cuda_fingerprint_v17(
+    value: Any,
+    *,
+    torch: Any,
+    label: str,
+    require_cuda: bool,
+) -> str:
+    """Return a fixed GPU-side summary without exporting a tensor.
+
+    The reductions execute on the tensor's resident device; only six scalar
+    reductions cross the boundary to form an auditable digest.  This is used
+    solely by the recurrent loop after its native commit, never by the scalar
+    floor operator or the detector.
+    """
+
+    if not bool(torch.is_tensor(value)) or not bool(torch.is_floating_point(value)):
+        raise RecurrentBetaFloorV17Error(f"{label} is not a floating tensor")
+    if require_cuda and getattr(value.device, "type", None) != "cuda":
+        raise RecurrentBetaFloorV17Error(f"{label} is not CUDA-resident")
+    if not bool(torch.isfinite(value).all().item()):
+        raise RecurrentBetaFloorV17Error(f"{label} is non-finite")
+    flat = value.detach().contiguous().reshape(-1).to(dtype=torch.float64)
+    if flat.numel() < 1:
+        raise RecurrentBetaFloorV17Error(f"{label} is empty")
+    positions = torch.arange(1, flat.numel() + 1, dtype=torch.float64, device=flat.device)
+    reductions = (
+        flat.sum(),
+        flat.abs().sum(),
+        (flat * positions).sum(),
+        flat.square().sum(),
+        flat.min(),
+        flat.max(),
+    )
+    encoded = "|".join(
+        (str(tuple(value.shape)), str(value.dtype), str(value.device))
+        + tuple(float(item.item()).hex() for item in reductions)
+    )
+    return "v17-native-gpu-fingerprint:" + hashlib.sha256(encoded.encode("ascii")).hexdigest()
+
+
+def _strict_mask_reduction_witness_v17(
+    model: Any,
+    update_mask: Any,
+    *,
+    torch: Any,
+    require_cuda: bool,
+) -> Mapping[str, Any]:
+    """Bind the native pending ``R`` which makes the floor strict.
+
+    ReCal3R stashes the unmodified native ``R`` immediately after its native
+    beta equation.  With an eligible update and any ``R > 0``, the fixed
+    0.1-to-0.0 base change strictly lowers that equation's mask.  The tensor is
+    neither returned nor serialized: the evidence carries a device-only digest
+    plus scalar truth values and interface metadata.
+    """
+
+    residual_weight = getattr(model, "_u_calibration_pending_u", None)
+    if not bool(torch.is_tensor(residual_weight)) or not bool(torch.is_floating_point(residual_weight)):
+        raise RecurrentBetaFloorV17Error("native ReCal3R pending R is unavailable")
+    if require_cuda and getattr(residual_weight.device, "type", None) != "cuda":
+        raise RecurrentBetaFloorV17Error("native ReCal3R pending R is not CUDA-resident")
+    if not bool(torch.isfinite(residual_weight).all().item()):
+        raise RecurrentBetaFloorV17Error("native ReCal3R pending R is non-finite")
+    if not bool(torch.is_tensor(update_mask)) or not bool(torch.is_floating_point(update_mask)):
+        raise RecurrentBetaFloorV17Error("native ReCal3R update eligibility is unavailable")
+    if require_cuda and getattr(update_mask.device, "type", None) != "cuda":
+        raise RecurrentBetaFloorV17Error("native ReCal3R update eligibility is not CUDA-resident")
+    residual_positive = bool((residual_weight > 0).any().item())
+    eligible = bool((update_mask > 0).any().item())
+    strict = bool(residual_positive and eligible)
+    return {
+        "strict_native_mask_reduction": strict,
+        "native_pending_r_positive": residual_positive,
+        "native_update_eligibility_positive": eligible,
+        "native_pending_r_shape": list(residual_weight.shape),
+        "native_pending_r_dtype": str(residual_weight.dtype),
+        "native_pending_r_device": str(residual_weight.device),
+        "native_pending_r_gpu_fingerprint": _cuda_fingerprint_v17(
+            residual_weight,
+            torch=torch,
+            label="native ReCal3R pending R",
+            require_cuda=require_cuda,
+        ),
+    }
+
+
 def run_recurrent_beta_floor_native_v17(
     views: Sequence[Mapping[str, Any]],
     model: Any,
@@ -297,6 +383,7 @@ def run_recurrent_beta_floor_native_v17(
         current_reset = _plain_reset(view["reset"])
         previous_reset = _plain_reset(reset_mask)
         mask_selection: BetaBaseFloorSelectionV17 | None = None
+        mask_witness: Mapping[str, Any] = {}
         if current_reset and armed:
             mask_selection = select_one_shot_beta_base_v17(armed, reset=True)
             armed = mask_selection.armed_after
@@ -324,6 +411,16 @@ def run_recurrent_beta_floor_native_v17(
                     update_mask1 = model._compute_recal3r_update_mask(
                         update_mask, cross_state, native_sequence, prev_state_feat=state_feat
                     )
+                    mask_witness = _strict_mask_reduction_witness_v17(
+                        model,
+                        update_mask,
+                        torch=torch,
+                        require_cuda=require_cuda_candidate,
+                    )
+                if mask_witness.get("strict_native_mask_reduction") is not True:
+                    raise RecurrentBetaFloorV17Error(
+                        "floored native mask lacks a strict-reduction witness"
+                    )
             else:
                 update_mask1 = model._compute_recal3r_update_mask(
                     update_mask, cross_state, native_sequence, prev_state_feat=state_feat
@@ -340,33 +437,129 @@ def run_recurrent_beta_floor_native_v17(
             state_feat = init_state_feat * reset_mask + state_feat * (1 - reset_mask)
             mem = init_mem * reset_mask + mem * (1 - reset_mask)
         detector_evidence: Mapping[str, Any] = {}
+        alarm_witness: Mapping[str, Any] = {}
         alarm = False
         if observer is not None:
             observation = observer.observe(frame_id, res, model, frame_context)
             alarm = bool(observer.alarm(observation))
+            if (
+                alarm
+                and mask_selection is not None
+                and mask_selection.consumed
+            ):
+                # A consumed old arm and a new current-frame alarm are both
+                # causally well-defined, but the one-use release validator has
+                # no representation for an alarm row that also carries the
+                # intervention.  Stop before committing the new detector row
+                # instead of silently creating a second outstanding arm.
+                raise RecurrentBetaFloorV17Error(
+                    "v17 frame simultaneously consumes an arm and raises a new alarm"
+                )
+            if alarm:
+                native_current_before = {
+                    "state": _cuda_fingerprint_v17(
+                        state_feat,
+                        torch=torch,
+                        label="raw current state",
+                        require_cuda=require_cuda_candidate,
+                    ),
+                    "memory": _cuda_fingerprint_v17(
+                        mem,
+                        torch=torch,
+                        label="raw current memory",
+                        require_cuda=require_cuda_candidate,
+                    ),
+                    "pose": _cuda_fingerprint_v17(
+                        res["camera_pose"],
+                        torch=torch,
+                        label="raw current pose",
+                        require_cuda=require_cuda_candidate,
+                    ),
+                }
             detector_evidence = dict(observer.finalize(observation)) | dict(
                 observer.timeline_evidence(observation)
             )
+            if alarm:
+                native_current_after = {
+                    "state": _cuda_fingerprint_v17(
+                        state_feat,
+                        torch=torch,
+                        label="raw current state after detector",
+                        require_cuda=require_cuda_candidate,
+                    ),
+                    "memory": _cuda_fingerprint_v17(
+                        mem,
+                        torch=torch,
+                        label="raw current memory after detector",
+                        require_cuda=require_cuda_candidate,
+                    ),
+                    "pose": _cuda_fingerprint_v17(
+                        res["camera_pose"],
+                        torch=torch,
+                        label="raw current pose after detector",
+                        require_cuda=require_cuda_candidate,
+                    ),
+                }
+                alarm_witness = {
+                    "raw_current_state_gpu_fingerprint_unchanged": native_current_before["state"] == native_current_after["state"],
+                    "raw_current_mem_gpu_fingerprint_unchanged": native_current_before["memory"] == native_current_after["memory"],
+                    "raw_current_pose_gpu_fingerprint_unchanged": native_current_before["pose"] == native_current_after["pose"],
+                    "raw_current_state_gpu_fingerprint": native_current_before["state"],
+                    "raw_current_mem_gpu_fingerprint": native_current_before["memory"],
+                    "raw_current_pose_gpu_fingerprint": native_current_before["pose"],
+                }
+                if not all(
+                    alarm_witness[name]
+                    for name in (
+                        "raw_current_state_gpu_fingerprint_unchanged",
+                        "raw_current_mem_gpu_fingerprint_unchanged",
+                        "raw_current_pose_gpu_fingerprint_unchanged",
+                    )
+                ):
+                    raise RecurrentBetaFloorV17Error(
+                        "detector altered the alarm-frame native commit"
+                    )
             if alarm:
                 armed = arm_one_future_update_v17(armed, alarm=True)
         if synchronize is not None:
             synchronize()
         elapsed += time.perf_counter() - started
         evidence = (
-            _mask_scope_evidence(mask_selection, frame_id=frame_id)
+            dict(_mask_scope_evidence(mask_selection, frame_id=frame_id)) | dict(mask_witness)
             if mask_selection is not None
             else None
         )
+        consumed = bool(mask_selection is not None and mask_selection.consumed)
         timeline.append(
             {
                 "frame_id": frame_id,
-                "action": "arm_one_future_native_beta_floor" if alarm else "commit",
+                "action": "one_shot_beta_base_floor" if consumed else (
+                    "armed_one_future_native_update" if alarm else "native_commit"
+                ),
                 "reason": "current_online_detector_alarm" if alarm else (
                     "always_commit_control" if observer is None else "current_online_detector_clear"
                 ),
                 "current_alarm": alarm,
-                "pending_transaction_count": 0,
+                "arm_pending": bool(armed),
+                "beta_base_override": (
+                    None if not consumed else FLOORED_BETA_BASE
+                ),
+                "beta_base_before": (
+                    None if not consumed else NATIVE_BETA_BASE
+                ),
+                "beta_base_during_mask": (
+                    None if not consumed else FLOORED_BETA_BASE
+                ),
+                "beta_base_restored": (
+                    None if not consumed else NATIVE_BETA_BASE
+                ),
+                "strict_mask_reduction": (
+                    None if not consumed else mask_witness["strict_native_mask_reduction"]
+                ),
+                "detector_constructed": observer is not None,
+                "operator_constructed": observer is not None,
                 "beta_floor": evidence,
+                **alarm_witness,
                 **detector_evidence,
             }
         )
