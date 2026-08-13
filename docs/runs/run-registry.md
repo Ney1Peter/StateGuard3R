@@ -1929,6 +1929,22 @@ launched or created.
   ReCal3R, checkpoint, or raw RGB occurred.
 - Audit: [recovery-update-pressure-bounded-state-memory-v14-gate-a-no-go.md](../audits/recovery-update-pressure-bounded-state-memory-v14-gate-a-no-go.md).
 
+### RECOVERY-UPDATE-PRESSURE-BOUNDED-STATE-MEMORY-V15-0001: independent RGB-list bounded write pressure
+
+- Status: **pre-registered — Gate A only; no CUDA release is authorized.**
+- Rationale: v14's historical-archive capsule provenance is terminally
+  disallowed.  v15 instead derives its sole dynamic RGB capability directly
+  from the ordinary raw `rgb.txt` listing and thirty read-only raw RGB files;
+  it cannot contact historical run/manifest archives.
+- Fixed mechanism: only after native update/state/memory/calibration/reset and
+  Detector-v3 raw-health commit, an alarm adds exactly `0.25` to native
+  `update_pressure`, capped at `1.0`; no current output/state/memory change,
+  rollback, replay, row selection or parameter tuning.
+- Fixed first-release IDs:
+  `recovery-update-pressure-v15-dynamic-always-commit-0001` and
+  `recovery-update-pressure-v15-dynamic-candidate-0001`.
+- Plan: [recovery-update-pressure-bounded-state-memory-v15-rgb-list-execution-plan.md](../recovery-update-pressure-bounded-state-memory-v15-rgb-list-execution-plan.md).
+
 ## Experiment record template
 
 Copy this section for every smoke test and formal run.
