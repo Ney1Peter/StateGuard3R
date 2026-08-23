@@ -213,30 +213,65 @@ def _optional_scalar(values: Mapping[str, Any] | None, name: str) -> float | Non
     return value
 
 
-def _single_pointmap(prediction: Mapping[str, Any], name: str) -> FloatArray:
-    if name not in prediction:
-        raise StateTriageEvidenceError(f"prediction is missing {name}")
-    values = _to_numpy(prediction[name], name=f"prediction.{name}")
-    if values.ndim == 4:
-        if values.shape[0] != 1:
-            raise StateTriageEvidenceError(f"prediction.{name} batch dimension must be one")
-        values = values[0]
-    if values.ndim != 3 or values.shape[2] != 3 or min(values.shape[:2]) < 1:
-        raise StateTriageEvidenceError(f"prediction.{name} must have shape (H, W, 3)")
+def _shape(value: Any, *, name: str) -> tuple[int, ...]:
+    raw = getattr(value, "shape", None)
+    if raw is None:
+        raise StateTriageEvidenceError(f"{name} does not expose a shape")
+    try:
+        return tuple(int(item) for item in raw)
+    except (TypeError, ValueError) as error:
+        raise StateTriageEvidenceError(f"{name} shape is invalid") from error
+
+
+def _sample_pointmap(value: Any, name: str, *, y: NDArray[np.int64], x: NDArray[np.int64]) -> FloatArray:
+    """Copy only fixed grid anchors, never a full pointmap into the observer."""
+
+    shape = _shape(value, name=f"prediction.{name}")
+    y_indices, x_indices = y.tolist(), x.tolist()
+    if len(shape) == 4:
+        if shape[0] != 1 or shape[-1] != 3:
+            raise StateTriageEvidenceError(f"prediction.{name} must have shape (1, H, W, 3)")
+        sampled = value[0, y_indices, x_indices]
+    elif len(shape) == 3:
+        if shape[-1] != 3:
+            raise StateTriageEvidenceError(f"prediction.{name} must have shape (H, W, 3)")
+        sampled = value[y_indices, x_indices]
+    else:
+        raise StateTriageEvidenceError(f"prediction.{name} must have a pointmap shape")
+    values = _to_numpy(sampled, name=f"prediction.{name} sampled anchors")
+    if values.shape != (len(y), 3):
+        raise StateTriageEvidenceError(f"prediction.{name} sampled anchors have invalid shape")
     return values
 
 
-def _single_map(prediction: Mapping[str, Any], name: str, *, shape: tuple[int, int]) -> FloatArray:
+def _sample_map(value: Any, name: str, *, y: NDArray[np.int64], x: NDArray[np.int64], shape: tuple[int, int]) -> FloatArray:
+    raw_shape = _shape(value, name=f"prediction.{name}")
+    y_indices, x_indices = y.tolist(), x.tolist()
+    if raw_shape == (1, *shape):
+        sampled = value[0, y_indices, x_indices]
+    elif raw_shape == shape:
+        sampled = value[y_indices, x_indices]
+    else:
+        raise StateTriageEvidenceError(f"prediction.{name} must have shape {shape} or (1, *shape)")
+    values = _to_numpy(sampled, name=f"prediction.{name} sampled anchors")
+    if values.shape != (len(y),):
+        raise StateTriageEvidenceError(f"prediction.{name} sampled anchors have invalid shape")
+    return values
+
+
+def _pointmap_hw(value: Any, name: str) -> tuple[int, int]:
+    shape = _shape(value, name=f"prediction.{name}")
+    if len(shape) == 4 and shape[0] == 1 and shape[-1] == 3:
+        return shape[1], shape[2]
+    if len(shape) == 3 and shape[-1] == 3:
+        return shape[0], shape[1]
+    raise StateTriageEvidenceError(f"prediction.{name} must have a pointmap shape")
+
+
+def _require_prediction(prediction: Mapping[str, Any], name: str) -> Any:
     if name not in prediction:
         raise StateTriageEvidenceError(f"prediction is missing {name}")
-    values = _to_numpy(prediction[name], name=f"prediction.{name}")
-    if values.ndim == 3:
-        if values.shape[0] != 1:
-            raise StateTriageEvidenceError(f"prediction.{name} batch dimension must be one")
-        values = values[0]
-    if values.shape != shape:
-        raise StateTriageEvidenceError(f"prediction.{name} must have shape {shape}")
-    return values
+    return prediction[name]
 
 
 def _model_rgb(value: Any) -> FloatArray:
@@ -368,21 +403,19 @@ class EvidenceObserver:
         if not isinstance(prediction, Mapping):
             raise StateTriageEvidenceError("prediction must be a mapping")
 
-        self_points = _single_pointmap(prediction, "pts3d_in_self_view")
-        other_points = _single_pointmap(prediction, "pts3d_in_other_view")
-        if self_points.shape != other_points.shape:
+        raw_self_points = _require_prediction(prediction, "pts3d_in_self_view")
+        raw_other_points = _require_prediction(prediction, "pts3d_in_other_view")
+        height, width = _pointmap_hw(raw_self_points, "pts3d_in_self_view")
+        if _pointmap_hw(raw_other_points, "pts3d_in_other_view") != (height, width):
             raise StateTriageEvidenceError("independent pointmaps must have the same shape")
-        height, width = self_points.shape[:2]
-        confidence = _single_map(prediction, "conf", shape=(height, width))
-        confidence_self = _single_map(prediction, "conf_self", shape=(height, width))
         camera = _camera_matrix(camera_to_reference)
         rgb = _model_rgb(model_ready_rgb)
 
         y, x = _grid_indices(height, width, self.config)
-        self_samples = self_points[y, x]
-        other_samples = other_points[y, x]
-        conf_samples = confidence[y, x]
-        conf_self_samples = confidence_self[y, x]
+        self_samples = _sample_pointmap(raw_self_points, "pts3d_in_self_view", y=y, x=x)
+        other_samples = _sample_pointmap(raw_other_points, "pts3d_in_other_view", y=y, x=x)
+        conf_samples = _sample_map(_require_prediction(prediction, "conf"), "conf", y=y, x=x, shape=(height, width))
+        conf_self_samples = _sample_map(_require_prediction(prediction, "conf_self"), "conf_self", y=y, x=x, shape=(height, width))
         transformed_self = self_samples @ camera[:3, :3].T + camera[:3, 3]
         errors = np.linalg.norm(transformed_self - other_samples, axis=1)
         scales = np.linalg.norm(other_samples, axis=1)
