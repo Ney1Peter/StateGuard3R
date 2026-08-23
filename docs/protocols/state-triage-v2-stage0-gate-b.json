@@ -1,0 +1,139 @@
+{
+  "schema_version": "stateguard3r.state-triage-stage0-gate-b.v1",
+  "stage": "GATE_B_FROZEN_PRE_EVALUATION",
+  "input_inventory": {
+    "path": "outputs/state-triage-v2-stage0-inputs-0001/protocol.json",
+    "sha256": "c1ef23a57e8413b8020d81649b95e0347dcb67c907c3a7808555bd4ad83a4984"
+  },
+  "control_inventory": {
+    "path": "outputs/state-triage-v2-stage0-controls-0001/protocol.json",
+    "sha256": "336e21bd2ce49a8554a022c3acefd5635245a90e542610a001404b07fe842a42"
+  },
+  "frozen_evidence_config": {
+    "grid_columns": 16,
+    "grid_rows": 12,
+    "image_quality_columns": 32,
+    "image_quality_rows": 32,
+    "max_anchor_history": 1024,
+    "max_conflict_anchor_history": 512,
+    "residual_mad_multiplier": 3.0,
+    "scalar_history_window": 15,
+    "scalar_scale_floor": 1e-06,
+    "support_radius_floor": 0.001,
+    "support_radius_relative": 0.05
+  },
+  "schema_calibration_outputs": [
+    {
+      "output": "state-triage-v2-stage0-schema-fr1-0030-observer-sparse-0005",
+      "evidence_sha256": "a43105b3d22b07ad3f165fbddd99b00374d4f0a4fc0df14be646aa89221f3d8b"
+    },
+    {
+      "output": "state-triage-v2-stage0-schema-fr1-0230-observer-sparse-0004",
+      "evidence_sha256": "6b357fe861dfc2e6c278e0e532dc88f0aa8254062496dbac614e0a85b1033e7f"
+    },
+    {
+      "output": "state-triage-v2-stage0-schema-fr1-0430-observer-sparse-0004",
+      "evidence_sha256": "ed2471a6f5b4f46b929e71b97c16d4b896ce65e2780c202fc521ab88daa1191d"
+    }
+  ],
+  "control_pairs": [
+    {
+      "source_sequence": "rgbd_dataset_freiburg1_desk",
+      "capsule_sha256": "34a28470862b4f3bc7b48e0f4b898fa3ccea552ca4007d23ed4cf7f15a995d4a",
+      "vanilla_output": "state-triage-v2-stage0-schema-fr1-0030-vanilla-sparse-0003",
+      "observer_output": "state-triage-v2-stage0-schema-fr1-0030-observer-sparse-0005",
+      "native_artifact_sha256": {
+        "checkpoint-load-audit.json": "3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d",
+        "health.jsonl": "f815fb4c888c0a1ffd2fabbc6ba3f07581bac0151bf9b08a91ce2fbb648534a0",
+        "predictions-summary.json": "1d1c1b993b3f9ac1bf69c6f411e4f2397040e79a48f41b77160530564c56db9c",
+        "trajectory.json": "79d05cfd806f444dfe72f0fcc61e03b13c67adcad5fdf18ea01cd49b89fee290"
+      }
+    },
+    {
+      "source_sequence": "rgbd_dataset_freiburg2_desk",
+      "capsule_sha256": "af9e6a324389ef5cf980e27f7fc9e2bd2f065129fc29c6d7cbda840c68985e34",
+      "vanilla_output": "state-triage-v2-stage0-control-normal_novelty-freiburg2_desk-2750-vanilla-0001",
+      "observer_output": "state-triage-v2-stage0-control-normal_novelty-freiburg2_desk-2750-observer-0001",
+      "native_artifact_sha256": {
+        "checkpoint-load-audit.json": "3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d",
+        "health.jsonl": "1a297421d7a285167133de24cd3a105f76ab85af758208a085f456ef457a9152",
+        "predictions-summary.json": "fab7413ed8477360ec3581d81574920bcdc385845e4004a4bf6f84cf30d6a6ea",
+        "trajectory.json": "3ce9347c615055bbb02085d9ca1eb9648faea0b98cea4fb2676bbbaf2e2235b2"
+      }
+    },
+    {
+      "source_sequence": "rgbd_dataset_freiburg3_walking_static",
+      "capsule_sha256": "d4d55fbad553e6c5752f9e26829d9967da07dc8cc90aea835952aa071eca02eb",
+      "vanilla_output": "state-triage-v2-stage0-control-normal_novelty-freiburg3_walking_static-0660-vanilla-0001",
+      "observer_output": "state-triage-v2-stage0-control-normal_novelty-freiburg3_walking_static-0660-observer-0001",
+      "native_artifact_sha256": {
+        "checkpoint-load-audit.json": "3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d",
+        "health.jsonl": "9885e80bd8efb7bc101dce0d6f48b723e92ea0cc50e642fa0dfcd7f6dc03e91e",
+        "predictions-summary.json": "896d2b0b08750ea5550d6bdca432d0deb6947b407b40168c800b691ab4dc5f87",
+        "trajectory.json": "b341f7ecd7f52ffe6c364b79e5bab65ddc57c1e1eed7374ba2138d599c200497"
+      }
+    },
+    {
+      "source_sequence": "rgbd_dataset_freiburg3_walking_xyz",
+      "capsule_sha256": "c32a90ce5cbd938e0c336f03117b03a5686b2d3b26beb408dfef061e609537f9",
+      "vanilla_output": "state-triage-v2-stage0-control-normal_novelty-freiburg3_walking_xyz-0780-vanilla-0001",
+      "observer_output": "state-triage-v2-stage0-control-normal_novelty-freiburg3_walking_xyz-0780-observer-0001",
+      "native_artifact_sha256": {
+        "checkpoint-load-audit.json": "3e12875a701e0afc534d8f3a90b6a5fb54a58cfca59e2ce055109e6db4a4153d",
+        "health.jsonl": "b4f854cc824fc013a3b11d451ed7c06c3bc534e6752c924d1544e57825c7e6cc",
+        "predictions-summary.json": "bee9b3308e1e9776de204693f21154341a686e4789b2f1ae8a8c6f6df4f8b633",
+        "trajectory.json": "a45c9432f4acf6fc6eb5d4a717202b3f5f48b7d9d7b286d26e4c4cc6d86170e1"
+      }
+    }
+  ],
+  "decision": {
+    "primary_scalar_baseline": "S0",
+    "thresholds": {
+      "coverage_novelty_max": 0.25,
+      "scalar_s0_native_geometric_residual_z_min": 3.823685674837548,
+      "scalar_s1_normalized_residual_median_min": 0.01731577700494636,
+      "quality_sharpness_max": 0.22041942345927823,
+      "quality_low_light_fraction_min": 0.24609375,
+      "quality_clipped_fraction_min": 0.2216796875,
+      "quality_confidence_disagreement_min": 0.8952845123906931,
+      "registration_pose_jump_z_min": 3.709270264685168,
+      "registration_geometric_residual_z_min": 3.823685674837548,
+      "registration_globality_min": 0.3854199989172777,
+      "transient_residual_high_fraction_min": 0.16666666666666666,
+      "transient_locality_min": 0.802035018113701
+    },
+    "future_k": 6,
+    "bootstrap_samples": 10000,
+    "bootstrap_seed": 20260823
+  },
+  "evaluation_inventory": [
+    {"capsule_id": "normal_novelty-freiburg2_desk-0080", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/normal_novelty-freiburg2_desk-0080.json", "capsule_sha256": "1407a113ce50f8fcfc8b56af4236c52136045fcf9c5487b558a57486f0a4aac1", "output": "state-triage-v2-stage0-eval-normal_novelty-freiburg2_desk-0080-observer-0001"},
+    {"capsule_id": "normal_novelty-freiburg2_desk-0380", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/normal_novelty-freiburg2_desk-0380.json", "capsule_sha256": "64cd692070f9ab4db1ba6fd233e2ff7063e10ed9e8caebe3dfaca3883ec134a1", "output": "state-triage-v2-stage0-eval-normal_novelty-freiburg2_desk-0380-observer-0001"},
+    {"capsule_id": "normal_novelty-freiburg3_walking_static-0090", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/normal_novelty-freiburg3_walking_static-0090.json", "capsule_sha256": "8fec3bf5656c2f3b3b5ec9ed5fc5d976fba81507fcfad972c4a7dad0bce5b4a1", "output": "state-triage-v2-stage0-eval-normal_novelty-freiburg3_walking_static-0090-observer-0001"},
+    {"capsule_id": "normal_novelty-freiburg3_walking_static-0380", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/normal_novelty-freiburg3_walking_static-0380.json", "capsule_sha256": "4b825cb7cd0791a0a387b67abb4b14a6e2cd8ff737e1efd7888dde1180b63262", "output": "state-triage-v2-stage0-eval-normal_novelty-freiburg3_walking_static-0380-observer-0001"},
+    {"capsule_id": "normal_novelty-freiburg3_walking_xyz-0180", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/normal_novelty-freiburg3_walking_xyz-0180.json", "capsule_sha256": "008b8b195ed0ce28fa40e7489afafcbb8e6fbbd901af0d5967f26be254ef06d7", "output": "state-triage-v2-stage0-eval-normal_novelty-freiburg3_walking_xyz-0180-observer-0001"},
+    {"capsule_id": "registration_or_order_fault-freiburg2_desk-0700", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/registration_or_order_fault-freiburg2_desk-0700.json", "capsule_sha256": "2aef388ae162a2878ee2265bc3357a61d1a55babe00cf51f03152425772b7b4b", "output": "state-triage-v2-stage0-eval-registration_or_order_fault-freiburg2_desk-0700-observer-0001"},
+    {"capsule_id": "registration_or_order_fault-freiburg2_desk-1050", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/registration_or_order_fault-freiburg2_desk-1050.json", "capsule_sha256": "04a9f077df03d845815cc1f12ba2cad487bb88ec4dcd31df7b11bf6390682917", "output": "state-triage-v2-stage0-eval-registration_or_order_fault-freiburg2_desk-1050-observer-0001"},
+    {"capsule_id": "registration_or_order_fault-freiburg3_walking_static-0180", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/registration_or_order_fault-freiburg3_walking_static-0180.json", "capsule_sha256": "df6f865aa7b70fb19ebd73bc4742bcfb5a024e78ab6084248dc18c5db882708c", "output": "state-triage-v2-stage0-eval-registration_or_order_fault-freiburg3_walking_static-0180-observer-0001"},
+    {"capsule_id": "registration_or_order_fault-freiburg3_walking_static-0500", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/registration_or_order_fault-freiburg3_walking_static-0500.json", "capsule_sha256": "38667bc6526381bc42885d0fb256eb40633070cefb85a202dfc020c59a8b51f7", "output": "state-triage-v2-stage0-eval-registration_or_order_fault-freiburg3_walking_static-0500-observer-0001"},
+    {"capsule_id": "registration_or_order_fault-freiburg3_walking_xyz-0330", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/registration_or_order_fault-freiburg3_walking_xyz-0330.json", "capsule_sha256": "0238ffe2ace59019c1ccc2a3803fd00f24a4d410a0ad343c2751e9cd3e620d46", "output": "state-triage-v2-stage0-eval-registration_or_order_fault-freiburg3_walking_xyz-0330-observer-0001"},
+    {"capsule_id": "bad_observation-freiburg2_desk-1400", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/bad_observation-freiburg2_desk-1400.json", "capsule_sha256": "a189c1c139872637f9b07bbc80971c2fd54d828193697e746dc3506d9d3b11c6", "output": "state-triage-v2-stage0-eval-bad_observation-freiburg2_desk-1400-observer-0001"},
+    {"capsule_id": "bad_observation-freiburg2_desk-1800", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/bad_observation-freiburg2_desk-1800.json", "capsule_sha256": "5e25b0c7b000d08fb1603ab8d879b30dc88265093ade70c1ea5bea8756e6fd5d", "output": "state-triage-v2-stage0-eval-bad_observation-freiburg2_desk-1800-observer-0001"},
+    {"capsule_id": "bad_observation-freiburg3_walking_static-0280", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/bad_observation-freiburg3_walking_static-0280.json", "capsule_sha256": "a1326c9b705b1fa95505a79ab2cd2ce173167068010fc994ce0880f561048dd1", "output": "state-triage-v2-stage0-eval-bad_observation-freiburg3_walking_static-0280-observer-0001"},
+    {"capsule_id": "bad_observation-freiburg3_walking_static-0620", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/bad_observation-freiburg3_walking_static-0620.json", "capsule_sha256": "0d082dc95583b295fd5e14d4e79c7d814d3af560a08570aaf5896814461d9d7a", "output": "state-triage-v2-stage0-eval-bad_observation-freiburg3_walking_static-0620-observer-0001"},
+    {"capsule_id": "bad_observation-freiburg3_walking_xyz-0520", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/bad_observation-freiburg3_walking_xyz-0520.json", "capsule_sha256": "f6d4e5ad689cb1c3dda2db5e021226ac4d62916ab225846c632307e79b39e71d", "output": "state-triage-v2-stage0-eval-bad_observation-freiburg3_walking_xyz-0520-observer-0001"},
+    {"capsule_id": "transient_local_content-freiburg2_desk-2200", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/transient_local_content-freiburg2_desk-2200.json", "capsule_sha256": "807bb462fe511573c4be407dab4f79acc510defeb8726356905f6821f6e78757", "output": "state-triage-v2-stage0-eval-transient_local_content-freiburg2_desk-2200-observer-0001"},
+    {"capsule_id": "transient_local_content-freiburg2_desk-2500", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/transient_local_content-freiburg2_desk-2500.json", "capsule_sha256": "941972a9ef0e06af57da81005e56084c36da54ce5ced19932084d6dcc9aaff2f", "output": "state-triage-v2-stage0-eval-transient_local_content-freiburg2_desk-2500-observer-0001"},
+    {"capsule_id": "transient_local_content-freiburg3_walking_static-0120", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/transient_local_content-freiburg3_walking_static-0120.json", "capsule_sha256": "f949a1c90ef8b52df7ebd54711a5781e7f4032501c2e2dff8829d2a06ad28cfb", "output": "state-triage-v2-stage0-eval-transient_local_content-freiburg3_walking_static-0120-observer-0001"},
+    {"capsule_id": "transient_local_content-freiburg3_walking_static-0440", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/transient_local_content-freiburg3_walking_static-0440.json", "capsule_sha256": "4ae8b7d79b34d4cfc0359cc1b4e861f2e96c9f29b9ff87052bcc5e7266fbf9f1", "output": "state-triage-v2-stage0-eval-transient_local_content-freiburg3_walking_static-0440-observer-0001"},
+    {"capsule_id": "transient_local_content-freiburg3_walking_xyz-0700", "capsule_path": "outputs/state-triage-v2-stage0-inputs-0001/evaluation/transient_local_content-freiburg3_walking_xyz-0700.json", "capsule_sha256": "d27b559bbdbc9de125064efd771dc3115273d426c2e105700d0c6524bc44e7c2", "output": "state-triage-v2-stage0-eval-transient_local_content-freiburg3_walking_xyz-0700-observer-0001"}
+  ],
+  "gates": {
+    "macro_f1_margin": 0.1,
+    "bootstrap_lower_95_min": 0.0,
+    "normal_novelty_false_reject_max": 0.1,
+    "unsafe_confusion_increase_max": 0.05,
+    "observer_overhead_ratio_max": 0.2,
+    "gpu_peak_delta_mib_max": 512.0
+  }
+}
