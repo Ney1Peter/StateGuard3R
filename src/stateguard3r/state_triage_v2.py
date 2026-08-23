@@ -40,8 +40,10 @@ class EvidenceConfig:
 
     grid_rows: int = 12
     grid_columns: int = 16
-    max_anchor_history: int = 2_048
-    max_conflict_anchor_history: int = 1_024
+    image_quality_rows: int = 32
+    image_quality_columns: int = 32
+    max_anchor_history: int = 1_024
+    max_conflict_anchor_history: int = 512
     scalar_history_window: int = 15
     support_radius_relative: float = 0.05
     support_radius_floor: float = 1e-3
@@ -52,6 +54,8 @@ class EvidenceConfig:
         positive_ints = (
             "grid_rows",
             "grid_columns",
+            "image_quality_rows",
+            "image_quality_columns",
             "max_anchor_history",
             "max_conflict_anchor_history",
             "scalar_history_window",
@@ -274,18 +278,36 @@ def _require_prediction(prediction: Mapping[str, Any], name: str) -> Any:
     return prediction[name]
 
 
-def _model_rgb(value: Any) -> FloatArray:
-    rgb = _to_numpy(value, name="model_ready_rgb")
-    if rgb.ndim == 4:
-        if rgb.shape[0] != 1:
-            raise StateTriageEvidenceError("model_ready_rgb batch dimension must be one")
-        rgb = rgb[0]
-    if rgb.ndim != 3:
-        raise StateTriageEvidenceError("model_ready_rgb must have three dimensions")
-    if rgb.shape[0] == 3:
-        rgb = np.moveaxis(rgb, 0, -1)
-    if rgb.shape[-1] != 3 or min(rgb.shape[:2]) < 2:
-        raise StateTriageEvidenceError("model_ready_rgb must have shape (H, W, 3)")
+def _grid_axis_indices(size: int, count: int) -> NDArray[np.int64]:
+    return np.rint(np.linspace(0, size - 1, count)).astype(np.int64)
+
+
+def _sample_model_rgb(value: Any, *, rows: int, columns: int) -> FloatArray:
+    """Copy a fixed quality grid instead of an entire model-ready RGB image."""
+
+    shape = _shape(value, name="model_ready_rgb")
+    if len(shape) == 4:
+        if shape[0] != 1 or shape[1] != 3:
+            raise StateTriageEvidenceError("model_ready_rgb must have shape (1, 3, H, W)")
+        height, width = shape[2], shape[3]
+    elif len(shape) == 3:
+        if shape[0] != 3:
+            raise StateTriageEvidenceError("model_ready_rgb must have shape (3, H, W)")
+        height, width = shape[1], shape[2]
+    else:
+        raise StateTriageEvidenceError("model_ready_rgb must have a channel-first image shape")
+    if min(height, width) < 2:
+        raise StateTriageEvidenceError("model_ready_rgb must have at least two pixels per dimension")
+    y, x = _grid_axis_indices(height, rows), _grid_axis_indices(width, columns)
+    y_grid, x_grid = np.meshgrid(y, x, indexing="ij")
+    y_indices, x_indices = y_grid.reshape(-1).tolist(), x_grid.reshape(-1).tolist()
+    sampled = value[0, :, y_indices, x_indices] if len(shape) == 4 else value[:, y_indices, x_indices]
+    channels = _to_numpy(sampled, name="model_ready_rgb sampled quality grid")
+    if channels.shape == (rows * columns, 3):
+        channels = channels.T
+    if channels.shape != (3, rows * columns):
+        raise StateTriageEvidenceError("model_ready_rgb sampled quality grid has invalid shape")
+    rgb = np.moveaxis(channels.reshape(3, rows, columns), 0, -1)
     if float(rgb.min()) < -1.0 - 1e-6 or float(rgb.max()) > 1.0 + 1e-6:
         raise StateTriageEvidenceError("model_ready_rgb must be normalized to [-1, 1]")
     return rgb
@@ -303,8 +325,8 @@ def _camera_matrix(value: Any) -> FloatArray:
 
 
 def _grid_indices(height: int, width: int, config: EvidenceConfig) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
-    rows = np.rint(np.linspace(0, height - 1, config.grid_rows)).astype(np.int64)
-    columns = np.rint(np.linspace(0, width - 1, config.grid_columns)).astype(np.int64)
+    rows = _grid_axis_indices(height, config.grid_rows)
+    columns = _grid_axis_indices(width, config.grid_columns)
     y, x = np.meshgrid(rows, columns, indexing="ij")
     return y.reshape(-1), x.reshape(-1)
 
@@ -409,7 +431,11 @@ class EvidenceObserver:
         if _pointmap_hw(raw_other_points, "pts3d_in_other_view") != (height, width):
             raise StateTriageEvidenceError("independent pointmaps must have the same shape")
         camera = _camera_matrix(camera_to_reference)
-        rgb = _model_rgb(model_ready_rgb)
+        rgb = _sample_model_rgb(
+            model_ready_rgb,
+            rows=self.config.image_quality_rows,
+            columns=self.config.image_quality_columns,
+        )
 
         y, x = _grid_indices(height, width, self.config)
         self_samples = _sample_pointmap(raw_self_points, "pts3d_in_self_view", y=y, x=x)
