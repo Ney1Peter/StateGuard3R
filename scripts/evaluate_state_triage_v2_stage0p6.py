@@ -126,7 +126,7 @@ def _event(item: Mapping[str, Any], protocol: Mapping[str, Any]) -> dict[str, An
     capsule = load_stage0_capsule(capsule_path)
     if capsule.capsule_id != item["capsule_id"]:
         raise Stage0p6EvaluationError("capsule ID differs")
-    output = _direct(str(item["output"]), ROOT / "outputs")
+    output = _direct(f"outputs/{item['output']}", ROOT / "outputs")
     _read_only(output, directory=True)
     run, evidence = _json(output / "run.json"), _json(output / "evidence.json")
     required = {"status", "observer", "input_capsule", "frame_count", "runner", "observer_wall_seconds", "runtime_seconds", "peak_memory_allocated_mib"}
