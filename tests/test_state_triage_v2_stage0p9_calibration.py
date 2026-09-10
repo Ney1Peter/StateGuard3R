@@ -17,11 +17,11 @@ def test_calibration_gate_requires_ten_activated_valid_events() -> None:
     assert not _gates([{"activated": True} for _ in range(11)], limits)["all_12_valid_events"]
 
 
-def test_dispatcher_is_parseable_and_requires_frozen_protocol() -> None:
+def test_dispatcher_is_parseable_and_reads_the_frozen_protocol() -> None:
     dispatcher = ROOT / "scripts" / "run_state_triage_v2_stage0p9_calibration.sh"
     parsed = subprocess.run(["bash", "-n", str(dispatcher)], text=True, capture_output=True)
-    absent = subprocess.run(["bash", str(dispatcher), "--dry-run"], cwd=ROOT, text=True, capture_output=True)
+    dry_run = subprocess.run(["bash", str(dispatcher), "--dry-run"], cwd=ROOT, text=True, capture_output=True)
 
     assert parsed.returncode == 0, parsed.stderr
-    assert absent.returncode != 0
-    assert "missing immutable Stage 0.9 calibration protocol" in absent.stderr
+    assert dry_run.returncode == 0, dry_run.stderr
+    assert len(dry_run.stdout.splitlines()) == 12
