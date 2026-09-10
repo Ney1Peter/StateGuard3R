@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -49,3 +50,44 @@ def test_scene_script_is_directly_importable_outside_repository(tmp_path: Path) 
     )
     assert completed.returncode == 0, completed.stderr
     assert "preflight" in completed.stdout
+
+
+def test_acquire_reuses_verified_archive_after_prepublication_failure(tmp_path: Path, monkeypatch) -> None:
+    tum_root = tmp_path / "tum"
+    outputs = tmp_path / "outputs"
+    tum_root.mkdir()
+    outputs.mkdir()
+    monkeypatch.setattr(scene.tum, "TUM_ROOT", tum_root)
+    monkeypatch.setattr(scene.tum, "OUTPUT_ROOT", outputs)
+    monkeypatch.setattr(scene, "EXPECTED_ARCHIVE_BYTES", len(b"fixture"))
+    monkeypatch.setattr(scene, "MINIMUM_DATA_BUDGET_BYTES", 1)
+    archive = tum_root / f"{scene.DATASET_NAME}.tgz"
+    archive.write_bytes(b"fixture")
+    archive.chmod(0o444)
+    preflight = tmp_path / "preflight"
+    preflight.mkdir()
+    preflight_record = {
+        "schema_version": f"{scene.SCHEMA_PREFIX}-preflight.v1",
+        "status": "PASS",
+        "dataset": scene.DATASET_NAME,
+        "expected_archive_bytes": len(b"fixture"),
+        "archive_target": str(archive),
+        "raw_target": str(tum_root / scene.DATASET_NAME),
+        "model_response_search_hits": [],
+        "official_source": {"canonical_url": scene.CANONICAL_URL},
+    }
+    (preflight / "preflight.json").write_text(json.dumps(preflight_record), encoding="utf-8")
+    staging_parent = tmp_path / "staging"
+    staged_root = staging_parent / scene.DATASET_NAME
+    staged_root.mkdir(parents=True)
+    monkeypatch.setattr(scene.tum, "_validate_archive", lambda _archive: {"fixture_archive_validation": True})
+    monkeypatch.setattr(scene.tum, "_tree_manifest", lambda _root: {"fixture_raw_manifest": True})
+    monkeypatch.setattr(scene.tum, "_extract_to_staging", lambda _archive: (staging_parent, staged_root))
+    monkeypatch.setattr(scene.tum, "_freeze_raw_tree", lambda _root, *, freeze_root: None)
+    monkeypatch.setattr(scene.tum, "_download_resume", lambda: (_ for _ in ()).throw(AssertionError("must not re-download verified archive")))
+
+    report = scene.acquire(preflight)
+
+    assert report["download"]["reused_verified_archive"] is True
+    assert (tum_root / scene.DATASET_NAME).is_dir()
+    assert not staging_parent.exists()

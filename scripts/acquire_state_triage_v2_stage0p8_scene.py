@@ -135,22 +135,31 @@ def acquire(preflight_dir: Path) -> dict[str, Any]:
             expected_name=ACQUISITION_OUTPUT_NAME,
         )
         preflight_record = _read_preflight(preflight_dir)
-        tum._assert_target_absent(permit_part=True)
+        archive = tum._archive_path()
+        raw = tum._raw_path()
+        part = tum._part_path()
+        tum._require(not raw.exists(), f"Stage 0.8 raw target already exists: {raw}")
         tum._require(shutil.disk_usage(tum.TUM_ROOT).free >= MINIMUM_DATA_BUDGET_BYTES, "insufficient disk space before Stage 0.8 download")
         tum.TUM_ROOT.mkdir(parents=True, exist_ok=True)
-        download = tum._download_resume()
-        archive = tum._archive_path()
-        os.replace(tum._part_path(), archive)
-        archive.chmod(0o444)
+        if archive.exists():
+            tum._require(archive.is_file() and not archive.is_symlink(), "existing Stage 0.8 archive is not a regular file")
+            tum._require(archive.stat().st_size == EXPECTED_ARCHIVE_BYTES, "existing Stage 0.8 archive size differs from preflight")
+            tum._require(not (archive.stat().st_mode & 0o222), "existing Stage 0.8 archive must be read-only")
+            tum._require(not part.exists(), "published Stage 0.8 archive and partial archive coexist")
+            download: Mapping[str, Any] = {"canonical_url": CANONICAL_URL, "reused_verified_archive": True, "final_bytes": archive.stat().st_size}
+        else:
+            tum._assert_target_absent(permit_part=True)
+            download = tum._download_resume()
+            os.replace(part, archive)
+            archive.chmod(0o444)
         archive_validation = tum._validate_archive(archive)
         archive_sha256 = tum._sha256(archive)
         staging_parent, staged_root = tum._extract_to_staging(archive)
         try:
             raw_manifest = tum._tree_manifest(staged_root)
-            tum._freeze_tree(staged_root)
-            staged_root.chmod(0o755)
-            os.replace(staged_root, tum._raw_path())
-            tum._raw_path().chmod(0o555)
+            tum._freeze_raw_tree(staged_root, freeze_root=False)
+            os.replace(staged_root, raw)
+            raw.chmod(0o555)
         finally:
             if staging_parent.exists():
                 shutil.rmtree(staging_parent)
@@ -175,8 +184,8 @@ def acquire(preflight_dir: Path) -> dict[str, Any]:
                 "validation": archive_validation,
             },
             "raw_tree": {
-                "path": str(tum._raw_path()),
-                "root_mode_octal": format(stat.S_IMODE(tum._raw_path().stat().st_mode), "04o"),
+                "path": str(raw),
+                "root_mode_octal": format(stat.S_IMODE(raw.stat().st_mode), "04o"),
                 "manifest": raw_manifest,
             },
             "postconditions": {
