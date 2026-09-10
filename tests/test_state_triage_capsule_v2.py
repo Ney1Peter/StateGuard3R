@@ -68,6 +68,23 @@ def _checkerboard_capsule(tmp_path: Path) -> Path:
     return path
 
 
+def _hashed_tile_capsule(tmp_path: Path) -> Path:
+    path = _capsule(tmp_path)
+    payload = json.loads(path.read_text())
+    path.chmod(0o644)
+    for frame in payload["frames"]:
+        frame["transforms"] = [{
+            "type": "hashed_tile_occlusion",
+            "coordinate_reference": COORDINATE_REFERENCE,
+            "rectangle": {"x": 0.0, "y": 0.0, "width": 1.0, "height": 0.75},
+            "tile_size_pixels": 2,
+            "fills": [[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]],
+            "seed": 1909,
+        }]
+    _write(path, payload)
+    return path
+
+
 def test_loads_and_rehashes_frozen_stage0_capsule(tmp_path: Path) -> None:
     path = _capsule(tmp_path)
     capsule = load_stage0_capsule(path)
@@ -131,6 +148,30 @@ def test_rejects_checkerboard_without_distinct_valid_fills(tmp_path: Path) -> No
     _write(path, payload)
 
     with pytest.raises(Stage0CapsuleError, match="fills must differ"):
+        load_stage0_capsule(path)
+
+
+def test_materializer_applies_deterministic_nonperiodic_hashed_tiles(tmp_path: Path) -> None:
+    capsule = load_stage0_capsule(_hashed_tile_capsule(tmp_path))
+    image = np.zeros((1, 3, 8, 8), dtype=np.float64)
+
+    first = apply_stage0_transforms([{"img": image}, {"img": image}], capsule)
+    second = apply_stage0_transforms([{"img": image}, {"img": image}], capsule)
+
+    np.testing.assert_array_equal(image, np.zeros_like(image))
+    np.testing.assert_array_equal(first[0]["img"], second[0]["img"])
+    assert set(np.unique(first[0]["img"][:, :, :6, :]).tolist()) == {-1.0, 1.0}
+    np.testing.assert_allclose(first[0]["img"][:, :, 6:, :], 0.0)
+
+
+def test_rejects_hashed_tiles_with_invalid_seed(tmp_path: Path) -> None:
+    path = _hashed_tile_capsule(tmp_path)
+    payload = json.loads(path.read_text())
+    path.chmod(0o644)
+    payload["frames"][0]["transforms"][0]["seed"] = -1
+    _write(path, payload)
+
+    with pytest.raises(Stage0CapsuleError, match="tile size or seed"):
         load_stage0_capsule(path)
 
 

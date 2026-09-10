@@ -29,7 +29,7 @@ CAUSES = frozenset(
         "normal_novelty",
     }
 )
-TRANSFORM_TYPES = frozenset({"temporal_reorder", "rectangle_occlusion", "checkerboard_occlusion"})
+TRANSFORM_TYPES = frozenset({"temporal_reorder", "rectangle_occlusion", "checkerboard_occlusion", "hashed_tile_occlusion"})
 
 
 class Stage0CapsuleError(ValueError):
@@ -236,6 +236,31 @@ def _checkerboard_transform(value: Mapping[str, Any], *, frame_id: int) -> dict[
     }
 
 
+def _hashed_tile_transform(value: Mapping[str, Any], *, frame_id: int) -> dict[str, Any]:
+    required = {"type", "coordinate_reference", "rectangle", "tile_size_pixels", "fills", "seed"}
+    if set(value) != required or value.get("type") != "hashed_tile_occlusion":
+        raise Stage0CapsuleError(f"frame {frame_id} has invalid hashed-tile transform fields")
+    if value.get("coordinate_reference") != COORDINATE_REFERENCE:
+        raise Stage0CapsuleError(f"frame {frame_id} hashed-tile coordinate reference differs")
+    raw_rectangle = value.get("rectangle")
+    if not isinstance(raw_rectangle, Mapping) or set(raw_rectangle) != {"x", "y", "width", "height"}:
+        raise Stage0CapsuleError(f"frame {frame_id} hashed-tile rectangle is invalid")
+    rectangle = {name: _finite(raw_rectangle[name], f"frame {frame_id} hashed-tile rectangle.{name}") for name in raw_rectangle}
+    if not 0.0 <= rectangle["x"] < 1.0 or not 0.0 <= rectangle["y"] < 1.0 or not 0.0 < rectangle["width"] <= 1.0 or not 0.0 < rectangle["height"] <= 1.0 or rectangle["x"] + rectangle["width"] > 1.0 or rectangle["y"] + rectangle["height"] > 1.0:
+        raise Stage0CapsuleError(f"frame {frame_id} hashed-tile rectangle is invalid")
+    tile_size = _plain_int(value.get("tile_size_pixels"), f"frame {frame_id} hashed-tile tile_size_pixels")
+    seed = _plain_int(value.get("seed"), f"frame {frame_id} hashed-tile seed")
+    if not 2 <= tile_size <= 128 or not 0 <= seed <= 2**31 - 1:
+        raise Stage0CapsuleError(f"frame {frame_id} hashed-tile tile size or seed is invalid")
+    fills = value.get("fills")
+    if not isinstance(fills, list) or len(fills) != 2 or any(not isinstance(fill, list) or len(fill) != 3 for fill in fills):
+        raise Stage0CapsuleError(f"frame {frame_id} hashed-tile fills are invalid")
+    normalized_fills = [[_finite(component, f"frame {frame_id} hashed-tile fill") for component in fill] for fill in fills]
+    if any(component < -1.0 or component > 1.0 for fill in normalized_fills for component in fill) or normalized_fills[0] == normalized_fills[1]:
+        raise Stage0CapsuleError(f"frame {frame_id} hashed-tile fills are invalid")
+    return {"type": "hashed_tile_occlusion", "coordinate_reference": COORDINATE_REFERENCE, "rectangle": rectangle, "tile_size_pixels": tile_size, "fills": normalized_fills, "seed": seed}
+
+
 def _reorder_transform(value: Mapping[str, Any], *, frame_id: int) -> dict[str, Any]:
     required = {"type", "expected_source_index", "replacement_source_index"}
     if set(value) != required or value.get("type") != "temporal_reorder":
@@ -258,6 +283,8 @@ def _transforms(value: Any, *, frame_id: int) -> tuple[Mapping[str, Any], ...]:
             parsed = _rectangle_transform(transform, frame_id=frame_id)
         elif transform["type"] == "checkerboard_occlusion":
             parsed = _checkerboard_transform(transform, frame_id=frame_id)
+        elif transform["type"] == "hashed_tile_occlusion":
+            parsed = _hashed_tile_transform(transform, frame_id=frame_id)
         else:
             parsed = _reorder_transform(transform, frame_id=frame_id)
         transforms.append(parsed)
@@ -379,7 +406,13 @@ def apply_stage0_transforms(views: Sequence[Mapping[str, Any]], capsule: Stage0C
                 bottom = min(top + tile_size, y1)
                 for tile_x, left in enumerate(range(x0, x1, tile_size)):
                     right = min(left + tile_size, x1)
-                    fill = fills[(tile_x + tile_y) % 2]
+                    if transform["type"] == "checkerboard_occlusion":
+                        fill = fills[(tile_x + tile_y) % 2]
+                    else:
+                        mixed = (int(transform["seed"]) ^ ((tile_x + 1) * 0x9E3779B1) ^ ((tile_y + 1) * 0x85EBCA77)) & 0xFFFFFFFF
+                        mixed = ((mixed ^ (mixed >> 16)) * 0x7FEB352D) & 0xFFFFFFFF
+                        mixed = ((mixed ^ (mixed >> 15)) * 0x846CA68B) & 0xFFFFFFFF
+                        fill = fills[(mixed ^ (mixed >> 16)) & 1]
                     image_copy[:, 0, top:bottom, left:right] = fill[0]
                     image_copy[:, 1, top:bottom, left:right] = fill[1]
                     image_copy[:, 2, top:bottom, left:right] = fill[2]
