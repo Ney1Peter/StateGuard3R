@@ -52,6 +52,22 @@ def _capsule(tmp_path: Path, *, cause: str = "transient_local_content") -> Path:
     return path
 
 
+def _checkerboard_capsule(tmp_path: Path) -> Path:
+    path = _capsule(tmp_path)
+    payload = json.loads(path.read_text())
+    path.chmod(0o644)
+    for frame in payload["frames"]:
+        frame["transforms"] = [{
+            "type": "checkerboard_occlusion",
+            "coordinate_reference": COORDINATE_REFERENCE,
+            "rectangle": {"x": 0.0, "y": 0.0, "width": 1.0, "height": 0.75},
+            "tile_size_pixels": 2,
+            "fills": [[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]],
+        }]
+    _write(path, payload)
+    return path
+
+
 def test_loads_and_rehashes_frozen_stage0_capsule(tmp_path: Path) -> None:
     path = _capsule(tmp_path)
     capsule = load_stage0_capsule(path)
@@ -91,6 +107,31 @@ def test_materializer_clones_and_only_changes_declared_rectangle(tmp_path: Path)
     np.testing.assert_array_equal(first, np.zeros_like(first))
     np.testing.assert_allclose(transformed[0]["img"][:, 0, 2:6, 2:6], 1.0)
     np.testing.assert_allclose(transformed[0]["img"][:, 1:, 2:6, 2:6], -1.0)
+
+
+def test_materializer_applies_declared_checkerboard_without_touching_raw_input(tmp_path: Path) -> None:
+    capsule = load_stage0_capsule(_checkerboard_capsule(tmp_path))
+    image = np.zeros((1, 3, 8, 8), dtype=np.float64)
+
+    transformed = apply_stage0_transforms([{"img": image}, {"img": image}], capsule)
+
+    np.testing.assert_array_equal(image, np.zeros_like(image))
+    np.testing.assert_allclose(transformed[0]["img"][:, :, 0:2, 0:2], -1.0)
+    np.testing.assert_allclose(transformed[0]["img"][:, :, 0:2, 2:4], 1.0)
+    np.testing.assert_allclose(transformed[0]["img"][:, :, 2:4, 0:2], 1.0)
+    np.testing.assert_allclose(transformed[0]["img"][:, :, 2:4, 2:4], -1.0)
+    np.testing.assert_allclose(transformed[0]["img"][:, :, 6:8, :], 0.0)
+
+
+def test_rejects_checkerboard_without_distinct_valid_fills(tmp_path: Path) -> None:
+    path = _checkerboard_capsule(tmp_path)
+    payload = json.loads(path.read_text())
+    path.chmod(0o644)
+    payload["frames"][0]["transforms"][0]["fills"] = [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
+    _write(path, payload)
+
+    with pytest.raises(Stage0CapsuleError, match="fills must differ"):
+        load_stage0_capsule(path)
 
 
 def test_rejects_writable_capsule(tmp_path: Path) -> None:

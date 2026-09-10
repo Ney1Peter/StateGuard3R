@@ -29,7 +29,7 @@ CAUSES = frozenset(
         "normal_novelty",
     }
 )
-TRANSFORM_TYPES = frozenset({"temporal_reorder", "rectangle_occlusion"})
+TRANSFORM_TYPES = frozenset({"temporal_reorder", "rectangle_occlusion", "checkerboard_occlusion"})
 
 
 class Stage0CapsuleError(ValueError):
@@ -200,6 +200,42 @@ def _rectangle_transform(value: Mapping[str, Any], *, frame_id: int) -> dict[str
     }
 
 
+def _checkerboard_transform(value: Mapping[str, Any], *, frame_id: int) -> dict[str, Any]:
+    required = {"type", "coordinate_reference", "rectangle", "tile_size_pixels", "fills"}
+    if set(value) != required or value.get("type") != "checkerboard_occlusion":
+        raise Stage0CapsuleError(f"frame {frame_id} has invalid checkerboard transform fields")
+    if value.get("coordinate_reference") != COORDINATE_REFERENCE:
+        raise Stage0CapsuleError(f"frame {frame_id} checkerboard coordinate reference differs")
+    raw_rectangle = value.get("rectangle")
+    if not isinstance(raw_rectangle, Mapping) or set(raw_rectangle) != {"x", "y", "width", "height"}:
+        raise Stage0CapsuleError(f"frame {frame_id} checkerboard rectangle is invalid")
+    rectangle = {name: _finite(raw_rectangle[name], f"frame {frame_id} checkerboard rectangle.{name}") for name in raw_rectangle}
+    if not 0.0 <= rectangle["x"] < 1.0 or not 0.0 <= rectangle["y"] < 1.0:
+        raise Stage0CapsuleError(f"frame {frame_id} checkerboard rectangle origin is invalid")
+    if not 0.0 < rectangle["width"] <= 1.0 or not 0.0 < rectangle["height"] <= 1.0:
+        raise Stage0CapsuleError(f"frame {frame_id} checkerboard rectangle size is invalid")
+    if rectangle["x"] + rectangle["width"] > 1.0 or rectangle["y"] + rectangle["height"] > 1.0:
+        raise Stage0CapsuleError(f"frame {frame_id} checkerboard rectangle exceeds bounds")
+    tile_size = _plain_int(value.get("tile_size_pixels"), f"frame {frame_id} checkerboard tile_size_pixels")
+    if not 2 <= tile_size <= 128:
+        raise Stage0CapsuleError(f"frame {frame_id} checkerboard tile_size_pixels is invalid")
+    fills = value.get("fills")
+    if not isinstance(fills, list) or len(fills) != 2 or any(not isinstance(fill, list) or len(fill) != 3 for fill in fills):
+        raise Stage0CapsuleError(f"frame {frame_id} checkerboard fills are invalid")
+    normalized_fills = [[_finite(component, f"frame {frame_id} checkerboard fill") for component in fill] for fill in fills]
+    if any(component < -1.0 or component > 1.0 for fill in normalized_fills for component in fill):
+        raise Stage0CapsuleError(f"frame {frame_id} checkerboard fills must be normalized to [-1, 1]")
+    if normalized_fills[0] == normalized_fills[1]:
+        raise Stage0CapsuleError(f"frame {frame_id} checkerboard fills must differ")
+    return {
+        "type": "checkerboard_occlusion",
+        "coordinate_reference": COORDINATE_REFERENCE,
+        "rectangle": rectangle,
+        "tile_size_pixels": tile_size,
+        "fills": normalized_fills,
+    }
+
+
 def _reorder_transform(value: Mapping[str, Any], *, frame_id: int) -> dict[str, Any]:
     required = {"type", "expected_source_index", "replacement_source_index"}
     if set(value) != required or value.get("type") != "temporal_reorder":
@@ -218,11 +254,12 @@ def _transforms(value: Any, *, frame_id: int) -> tuple[Mapping[str, Any], ...]:
     for transform in value:
         if not isinstance(transform, Mapping) or transform.get("type") not in TRANSFORM_TYPES:
             raise Stage0CapsuleError(f"frame {frame_id} has unsupported transform")
-        parsed = (
-            _rectangle_transform(transform, frame_id=frame_id)
-            if transform["type"] == "rectangle_occlusion"
-            else _reorder_transform(transform, frame_id=frame_id)
-        )
+        if transform["type"] == "rectangle_occlusion":
+            parsed = _rectangle_transform(transform, frame_id=frame_id)
+        elif transform["type"] == "checkerboard_occlusion":
+            parsed = _checkerboard_transform(transform, frame_id=frame_id)
+        else:
+            parsed = _reorder_transform(transform, frame_id=frame_id)
         transforms.append(parsed)
     if len({item["type"] for item in transforms}) != len(transforms):
         raise Stage0CapsuleError(f"frame {frame_id} repeats a transform type")
@@ -302,7 +339,7 @@ def load_stage0_capsule(path: str | os.PathLike[str]) -> Stage0Capsule:
 
 
 def apply_stage0_transforms(views: Sequence[Mapping[str, Any]], capsule: Stage0Capsule) -> list[dict[str, Any]]:
-    """Copy model-ready views and apply only the capsule's deferred rectangles.
+    """Copy model-ready views and apply only the capsule's deferred transforms.
 
     Temporal reordering is represented by the already-final path order and
     therefore has no pixel mutation.  This function intentionally accepts
@@ -320,7 +357,7 @@ def apply_stage0_transforms(views: Sequence[Mapping[str, Any]], capsule: Stage0C
         clone = getattr(image, "clone", None)
         image_copy = clone() if callable(clone) else np.array(image, copy=True)
         for transform in frame.transforms:
-            if transform["type"] != "rectangle_occlusion":
+            if transform["type"] == "temporal_reorder":
                 continue
             if getattr(image_copy, "ndim", None) != 4 or image_copy.shape[0] != 1 or image_copy.shape[1] != 3:
                 raise Stage0CapsuleError("model-ready image must have shape (1, 3, H, W)")
@@ -330,10 +367,22 @@ def apply_stage0_transforms(views: Sequence[Mapping[str, Any]], capsule: Stage0C
             x1 = max(x0 + 1, min(width, math.ceil((rectangle["x"] + rectangle["width"]) * width)))
             y0 = max(0, min(height, math.floor(rectangle["y"] * height)))
             y1 = max(y0 + 1, min(height, math.ceil((rectangle["y"] + rectangle["height"]) * height)))
-            fill = transform["fill"]
-            image_copy[:, 0, y0:y1, x0:x1] = fill[0]
-            image_copy[:, 1, y0:y1, x0:x1] = fill[1]
-            image_copy[:, 2, y0:y1, x0:x1] = fill[2]
+            if transform["type"] == "rectangle_occlusion":
+                fill = transform["fill"]
+                image_copy[:, 0, y0:y1, x0:x1] = fill[0]
+                image_copy[:, 1, y0:y1, x0:x1] = fill[1]
+                image_copy[:, 2, y0:y1, x0:x1] = fill[2]
+                continue
+            tile_size = transform["tile_size_pixels"]
+            fills = transform["fills"]
+            for tile_y, top in enumerate(range(y0, y1, tile_size)):
+                bottom = min(top + tile_size, y1)
+                for tile_x, left in enumerate(range(x0, x1, tile_size)):
+                    right = min(left + tile_size, x1)
+                    fill = fills[(tile_x + tile_y) % 2]
+                    image_copy[:, 0, top:bottom, left:right] = fill[0]
+                    image_copy[:, 1, top:bottom, left:right] = fill[1]
+                    image_copy[:, 2, top:bottom, left:right] = fill[2]
         copied["img"] = image_copy
         output.append(copied)
     return output
