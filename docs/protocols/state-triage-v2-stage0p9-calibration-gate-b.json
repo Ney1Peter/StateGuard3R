@@ -1,0 +1,147 @@
+{
+  "calibration_inventory": [
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-0110",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-0110.json",
+      "capsule_sha256": "ad554660b215c5997710d42f1799f817311d4bf02411168a9fd0f509d57e54be",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-0110-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-0270",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-0270.json",
+      "capsule_sha256": "3fca7c8b8a2e581197c87957d58288a0e6bbc18dfc54bffffb540cfeb08535b0",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-0270-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-0730",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-0730.json",
+      "capsule_sha256": "2e7e3a157eb2c080705e8a33adb57dd7849dbe91cd4543984b7f10f88c992f16",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-0730-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-0870",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-0870.json",
+      "capsule_sha256": "8913c0456990270c89f36f657181c72f34ac3de305c2348cc5f8f479c43f057d",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-0870-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-1230",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-1230.json",
+      "capsule_sha256": "7f75adaa4115d35c1367be9224d1a96509e2f5186f6847691f60e72a45af19ad",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-1230-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-1430",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-1430.json",
+      "capsule_sha256": "1582b50bc14409dbfae44a81d0eb685e62068a14fd169177d7af7d47e57da595",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-1430-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-1770",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-1770.json",
+      "capsule_sha256": "fe772131d22b2f4259ab3b415bd55b9dcb5776a8658a4d1d618986bcd5e75de1",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-1770-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-1950",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-1950.json",
+      "capsule_sha256": "002d0dac1927325f8ab1a53ac1318ce12511af5926447badcc3967109965c5b1",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-1950-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-2380",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-2380.json",
+      "capsule_sha256": "7fdc104d22656734887a40d3eb997cb0efe7db5d84cc0b98c46a0fd0852a7400",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-2380-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-2630",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-2630.json",
+      "capsule_sha256": "aa1f7e00dc0f8e57600c1003ff9aeecd27c7b368683b53dbeb2befc2330034ce",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-2630-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-2760",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-2760.json",
+      "capsule_sha256": "2494482713ec4879b80db40cb72bfb1e659690b0fde872960fdd452a350aa33d",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-2760-observer-0001"
+    },
+    {
+      "capsule_id": "calibration-transient_local_content-freiburg2_desk-2850",
+      "capsule_path": "outputs/state-triage-v2-stage0p9-inputs-0001/calibration/calibration-transient_local_content-freiburg2_desk-2850.json",
+      "capsule_sha256": "fff94e9f89b1e6e92b0dee890d7da99add5d1b2e81e3af7f2a52b3f8b4c20080",
+      "output": "state-triage-v2-stage0p9-calibration-calibration-transient_local_content-freiburg2_desk-2850-observer-0001"
+    }
+  ],
+  "decision": {
+    "aggregation": "first_non_unresolved_current_row_in_predeclared_event_window",
+    "clipped_fraction_transient_min": 0.2,
+    "coverage_ablation_method": "C0.8",
+    "coverage_ablation_order": [
+      "sharpness_lte_0.05_bad_observation",
+      "coverage_lt_0.25_normal_novelty",
+      "clipped_fraction_gte_0.20_transient_local_content",
+      "pose_jump_z_or_native_geometric_residual_z_gte_3_registration_or_order_fault",
+      "otherwise_unresolved"
+    ],
+    "coverage_novelty_max_exclusive": 0.25,
+    "registration_z_min": 3.0,
+    "scalar_method": "S0.8",
+    "scalar_order": [
+      "coverage_lt_0.25_normal_novelty",
+      "native_geometric_residual_z_gte_3_registration_or_order_fault",
+      "otherwise_unresolved"
+    ],
+    "sharpness_bad_observation_max": 0.05,
+    "typed_method": "T0.8",
+    "typed_order": [
+      "sharpness_lte_0.05_bad_observation",
+      "clipped_fraction_gte_0.20_transient_local_content",
+      "coverage_lt_0.25_normal_novelty",
+      "pose_jump_z_or_native_geometric_residual_z_gte_3_registration_or_order_fault",
+      "otherwise_unresolved"
+    ]
+  },
+  "frozen_evidence_config": {
+    "grid_columns": 16,
+    "grid_rows": 12,
+    "image_quality_columns": 32,
+    "image_quality_rows": 32,
+    "max_anchor_history": 1024,
+    "max_conflict_anchor_history": 512,
+    "residual_mad_multiplier": 3.0,
+    "scalar_history_window": 15,
+    "scalar_scale_floor": 1e-06,
+    "support_radius_floor": 0.001,
+    "support_radius_relative": 0.05
+  },
+  "frozen_sources": {
+    "observer_path": "src/stateguard3r/state_triage_v2.py",
+    "observer_sha256": "6977a00ca12dec1ebe905cf3d16fcd0d2b5279bee8bd98044e40bcd4f732c4a7",
+    "runner_path": "scripts/run_state_triage_v2_stage0.py",
+    "runner_sha256": "75b8c7d066889d4f28623fd68b9f3a36a9a5897c8b525475b99df09c0b834723"
+  },
+  "gates": {
+    "activated_event_min": 10,
+    "clipped_fraction_min": 0.2,
+    "coverage_max_exclusive": 0.25,
+    "sharpness_min_exclusive": 0.05,
+    "valid_event_count": 12
+  },
+  "input_inventory": {
+    "path": "outputs/state-triage-v2-stage0p9-inputs-0001",
+    "sha256": "dd25fccdd77b9e324fa9c6d054837aaf17ff565a562e6e7bf54453c4419b69b3"
+  },
+  "interaction": {
+    "clipped_fraction_min": 0.2,
+    "coverage_ablation_expected_label": "normal_novelty",
+    "coverage_max_exclusive": 0.25,
+    "row": "first_predeclared_event_row",
+    "sharpness_min_exclusive": 0.05,
+    "truth": "transient_local_content",
+    "typed_expected_label": "transient_local_content"
+  },
+  "schema_version": "stateguard3r.state-triage-stage0p9-calibration-gate-b.v1",
+  "scope": "sealed hashed-tile recipe-feasibility calibration only; permanently excluded from final scoring",
+  "stage": "GATE_B_STAGE0P9_CALIBRATION_FROZEN_PRE_EVALUATION"
+}
